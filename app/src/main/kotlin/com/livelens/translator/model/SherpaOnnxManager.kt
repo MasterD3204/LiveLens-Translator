@@ -1,8 +1,8 @@
 package com.livelens.translator.model
 
-import android.content.Context
 import com.k2fsa.sherpa.onnx.EndpointConfig
 import com.k2fsa.sherpa.onnx.EndpointRule
+import com.k2fsa.sherpa.onnx.FastClusteringConfig
 import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.OfflineSpeakerDiarization
 import com.k2fsa.sherpa.onnx.OfflineSpeakerDiarizationConfig
@@ -11,7 +11,7 @@ import com.k2fsa.sherpa.onnx.OfflineSpeakerSegmentationPyannoteModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
-import com.k2fsa.sherpa.onnx.OfflineTtsPiperModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
@@ -19,22 +19,20 @@ import com.k2fsa.sherpa.onnx.OnlineStream
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.SileroVadModelConfig
 import com.k2fsa.sherpa.onnx.SpeakerEmbeddingExtractorConfig
-import com.k2fsa.sherpa.onnx.FastClusteringConfig
+import com.k2fsa.sherpa.onnx.Vad
 import com.k2fsa.sherpa.onnx.VadModelConfig
-import com.k2fsa.sherpa.onnx.VoiceActivityDetector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 /**
- * Wrapper quản lý sherpa-onnx: VAD, STT (Zipformer), TTS (Piper), Speaker Diarization.
+ * Wrapper quản lý sherpa-onnx: VAD, STT (Zipformer), TTS (VITS/Piper), Speaker Diarization.
  * Được tạo thủ công qua ModelModule.provideSherpaOnnxManager().
  */
 class SherpaOnnxManager(
-    private val context: Context,
     private val modelLoader: ModelLoader
 ) {
-    private var vad: VoiceActivityDetector? = null
+    private var vad: Vad? = null
     private var recognizer: OnlineRecognizer? = null
     private var tts: OfflineTts? = null
     private var diarization: OfflineSpeakerDiarization? = null
@@ -43,11 +41,6 @@ class SherpaOnnxManager(
 
     companion object {
         private const val SAMPLE_RATE = 16000
-        private const val VAD_THRESHOLD = 0.5f
-        private const val VAD_MIN_SILENCE_SEC = 0.5f
-        private const val VAD_MIN_SPEECH_SEC = 0.25f
-        private const val VAD_MAX_SPEECH_SEC = 30f
-        private const val VAD_WINDOW_SIZE = 512
     }
 
     suspend fun initialize() = withContext(Dispatchers.IO) {
@@ -68,30 +61,32 @@ class SherpaOnnxManager(
     // ─── Init ────────────────────────────────────────────────────────────────
 
     private fun initVad() {
-        vad = VoiceActivityDetector(
-            ttsModelConfig = VadModelConfig(
-                sileroVad = SileroVadModelConfig(
-                    model = modelLoader.vadModelFile.absolutePath,
-                    threshold = VAD_THRESHOLD,
-                    minSilenceDuration = VAD_MIN_SILENCE_SEC,
-                    minSpeechDuration = VAD_MIN_SPEECH_SEC,
-                    maxSpeechDuration = VAD_MAX_SPEECH_SEC,
-                    windowSize = VAD_WINDOW_SIZE
+        vad = Vad(
+            config = VadModelConfig(
+                sileroVadModelConfig = SileroVadModelConfig(
+                    model             = modelLoader.vadModelFile.absolutePath,
+                    threshold         = 0.5f,
+                    minSilenceDuration = 0.5f,
+                    minSpeechDuration  = 0.25f,
+                    maxSpeechDuration  = 30f,
+                    windowSize        = 512
                 ),
-                sampleRate = SAMPLE_RATE,
-                numThreads = 2,
-                provider = "cpu",
-                debug = false
-            ),
-            bufferSizeInSeconds = 60f
+                sampleRate  = SAMPLE_RATE,
+                numThreads  = 2,
+                provider    = "cpu",
+                debug       = false
+            )
         )
         Timber.d("VAD initialized")
     }
 
     private fun initStt() {
         recognizer = OnlineRecognizer(
-            ttsConfig = OnlineRecognizerConfig(
-                featConfig = FeatureConfig(sampleRate = SAMPLE_RATE, featureDim = 80),
+            config = OnlineRecognizerConfig(
+                featConfig = FeatureConfig(
+                    sampleRate = SAMPLE_RATE,
+                    featureDim = 80
+                ),
                 modelConfig = OnlineModelConfig(
                     transducer = OnlineTransducerModelConfig(
                         encoder = modelLoader.sttEncoderFile.absolutePath,
@@ -117,11 +112,12 @@ class SherpaOnnxManager(
     }
 
     private fun initTts() {
+        // Piper Vietnamese models dùng VITS format
         val parent = modelLoader.ttsModelFile.parent ?: ""
         tts = OfflineTts(
-            ttsConfig = OfflineTtsConfig(
+            config = OfflineTtsConfig(
                 model = OfflineTtsModelConfig(
-                    piper = OfflineTtsPiperModelConfig(
+                    vits = OfflineTtsVitsModelConfig(
                         model   = modelLoader.ttsModelFile.absolutePath,
                         dataDir = parent,
                         dictDir = parent
@@ -141,7 +137,9 @@ class SherpaOnnxManager(
         diarization = OfflineSpeakerDiarization(
             config = OfflineSpeakerDiarizationConfig(
                 segmentation = OfflineSpeakerSegmentationModelConfig(
-                    pyannote   = OfflineSpeakerSegmentationPyannoteModelConfig(model = modelLoader.diarizationSegmentFile.absolutePath),
+                    pyannote   = OfflineSpeakerSegmentationPyannoteModelConfig(
+                        model = modelLoader.diarizationSegmentFile.absolutePath
+                    ),
                     numThreads = 2,
                     debug      = false,
                     provider   = "cpu"
@@ -152,8 +150,8 @@ class SherpaOnnxManager(
                     debug      = false,
                     provider   = "cpu"
                 ),
-                clustering    = FastClusteringConfig(numClusters = -1, threshold = 0.5f),
-                minDurationOn = 0.3f,
+                clustering     = FastClusteringConfig(numClusters = -1, threshold = 0.5f),
+                minDurationOn  = 0.3f,
                 minDurationOff = 0.5f
             )
         )
@@ -225,14 +223,16 @@ class SherpaOnnxManager(
             }
         }
 
-    val ttsSampleRate: Int get() = tts?.sampleRate ?: 22050
+    // sampleRate() là function trong sherpa-onnx, không phải property
+    val ttsSampleRate: Int get() = tts?.sampleRate() ?: 22050
 
     // ─── Diarization ─────────────────────────────────────────────────────────
 
-    suspend fun diarize(samples: FloatArray, sampleRate: Int = SAMPLE_RATE): List<DiarizationSegment> =
+    // process() chỉ nhận samples, không có sampleRate
+    suspend fun diarize(samples: FloatArray): List<DiarizationSegment> =
         withContext(Dispatchers.IO) {
             try {
-                diarization?.process(samples = samples, sampleRate = sampleRate)
+                diarization?.process(samples)
                     ?.sortedBy { it.start }
                     ?.map { DiarizationSegment(it.start, it.end, it.speaker) }
                     ?: emptyList()
@@ -246,6 +246,10 @@ class SherpaOnnxManager(
 
     fun release() {
         activeStream = null
+        recognizer?.release()
+        vad?.release()
+        tts?.release()
+        diarization?.release()
         recognizer   = null
         vad          = null
         tts          = null

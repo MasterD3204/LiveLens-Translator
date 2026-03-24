@@ -24,10 +24,9 @@ object ModelModule {
     @Provides
     @Singleton
     fun provideSherpaOnnxManager(
-        @ApplicationContext context: Context,
         modelLoader: ModelLoader
     ): SherpaOnnxManager {
-        return SherpaOnnxManager(context, modelLoader)
+        return SherpaOnnxManager(modelLoader)
     }
 
     @Provides
