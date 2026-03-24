@@ -1,0 +1,13 @@
+<!-- Round launcher icon -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#1565C0"
+        android:pathData="M54,4 C26.4,4 4,26.4 4,54 C4,81.6 26.4,104 54,104 C81.6,104 104,81.6 104,54 C104,26.4 81.6,4 54,4Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M45,35 L65,35 L65,45 L55,45 L55,63 L65,63 L65,73 L45,73 L45,63 L53,63 L53,45 L45,45 Z" />
+</vector>

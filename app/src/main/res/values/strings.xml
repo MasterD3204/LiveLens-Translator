@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LiveLens Translator</string>
+    <string name="accessibility_service_description">LiveLens Translator overlay service. Enables the floating translation bubble and subtitle overlay across all apps.</string>
+
+    <!-- Mode labels -->
+    <string name="mode_conversation">Conversation</string>
+    <string name="mode_media">Media</string>
+    <string name="mode_image">Image</string>
+
+    <!-- Permissions -->
+    <string name="permission_audio_title">Microphone Permission</string>
+    <string name="permission_audio_rationale">LiveLens needs microphone access to capture and translate speech in real time.</string>
+    <string name="permission_overlay_title">Display Over Other Apps</string>
+    <string name="permission_overlay_rationale">LiveLens needs permission to display translation overlays on top of other apps.</string>
+    <string name="permission_camera_title">Camera Permission</string>
+    <string name="permission_camera_rationale">LiveLens needs camera access to translate text in photos.</string>
+    <string name="permission_notification_title">Notification Permission</string>
+    <string name="permission_notification_rationale">LiveLens needs notification permission to show the foreground service notification.</string>
+
+    <!-- Buttons -->
+    <string name="start_service">Start Service</string>
+    <string name="stop_service">Stop Service</string>
+    <string name="capture_image">Capture</string>
+    <string name="pick_gallery">Gallery</string>
+    <string name="translate">Translate</string>
+    <string name="copy_result">Copy</string>
+    <string name="share_result">Share</string>
+
+    <!-- Overlay -->
+    <string name="speaker_a">Speaker A</string>
+    <string name="speaker_b">Speaker B</string>
+    <string name="blocked_audio_message">This app blocks audio capture. Switch to Mic mode.</string>
+
+    <!-- Settings -->
+    <string name="settings_tts">Text-to-Speech Readout</string>
+    <string name="settings_tts_speed">TTS Speed</string>
+    <string name="settings_overlay_opacity">Overlay Opacity</string>
+    <string name="settings_subtitle_position">Subtitle Position</string>
+    <string name="settings_font_size">Font Size</string>
+    <string name="settings_max_sentences">Max Overlay Sentences</string>
+    <string name="settings_drop_threshold">Sentence Drop Threshold</string>
+    <string name="settings_model_status">Model Status</string>
+
+    <!-- Model download -->
+    <string name="model_download_title">Download AI Models</string>
+    <string name="model_download_description">LiveLens requires AI models to work offline. Download once, translate forever.</string>
+    <string name="download_stt_model">Zipformer STT Model (~90 MB)</string>
+    <string name="download_gemma_model">Gemma Translate Model (~1.5 GB)</string>
+    <string name="download_tts_model">Piper TTS Model (~50 MB)</string>
+    <string name="download_button">Download Models</string>
+    <string name="model_ready">Model Ready</string>
+    <string name="model_missing">Model Missing</string>
+    <string name="model_downloading">Downloading…</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_service">Translation Service</string>
+    <string name="notification_service_title">LiveLens Translator Active</string>
+    <string name="notification_service_text">Translation overlay is running</string>
+
+    <!-- History -->
+    <string name="history_empty">No translations yet.\nStart translating to see history here.</string>
+    <string name="history_delete_confirm">Delete this translation?</string>
+    <string name="delete">Delete</string>
+    <string name="cancel">Cancel</string>
+</resources>

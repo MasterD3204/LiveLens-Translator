@@ -1,0 +1,97 @@
+# ─── Android / Gradle ───────────────────────────────────────────────────────
+*.iml
+.gradle/
+local.properties
+.idea/
+.idea/caches/
+.idea/libraries/
+.idea/modules.xml
+.idea/workspace.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+.DS_Store
+/build/
+/captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Module build outputs
+app/build/
+app/release/
+app/debug/
+
+# Gradle wrapper jar (optional — include if you want reproducible builds offline)
+# gradle/wrapper/gradle-wrapper.jar
+
+# Keystore / signing configs — NEVER commit these
+*.jks
+*.keystore
+keystore.properties
+release.properties
+signing.properties
+
+# ProGuard mapping files
+/app/mapping.txt
+/app/seeds.txt
+/app/usage.txt
+
+# ─── AI Model files — too large for Git ─────────────────────────────────────
+# Model files are sideloaded at runtime; see README for download instructions.
+*.onnx
+*.task
+*.bin
+*.pt
+*.tflite
+*.ot
+models/
+
+# But keep placeholder/config files in tracked dirs
+!**/tokens.txt
+!**/*.json
+
+# ─── Kotlin / JVM ────────────────────────────────────────────────────────────
+*.class
+*.log
+*.ctxt
+.mtj.tmp/
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+*.war
+*.nar
+*.ear
+*.zip
+*.tar.gz
+*.rar
+hs_err_pid*
+replay_pid*
+
+# ─── IntelliJ IDEA / Android Studio ─────────────────────────────────────────
+out/
+.idea/
+*.iws
+*.ipr
+atlassian-ide-plugin.xml
+com_crashlytics_export_strings.xml
+crashlytics.properties
+crashlytics-build.properties
+fabric.properties
+
+# ─── OS generated files ──────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ─── Environment / secrets ───────────────────────────────────────────────────
+.env
+.env.*
+secrets.properties
+google-services.json
