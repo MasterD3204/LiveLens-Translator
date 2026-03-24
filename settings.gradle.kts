@@ -9,7 +9,6 @@ pluginManagement {
         }
         mavenCentral()
         gradlePluginPortal()
-        maven { url = uri("https://jitpack.io") }
     }
 }
 
@@ -18,7 +17,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven { url = uri("https://jitpack.io") }
+        // MediaPipe LLM Inference API
         maven { url = uri("https://storage.googleapis.com/download.tensorflow.org/maven") }
     }
 }

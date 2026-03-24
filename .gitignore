@@ -49,9 +49,11 @@ signing.properties
 *.ot
 models/
 
-# But keep placeholder/config files in tracked dirs
-!**/tokens.txt
-!**/*.json
+# sherpa-onnx AAR — download bằng scripts/download-sherpa-onnx.sh
+app/libs/*.aar
+app/libs/*.jar
+# Nhưng giữ .gitkeep để thư mục libs được track
+!app/libs/.gitkeep
 
 # ─── Kotlin / JVM ────────────────────────────────────────────────────────────
 *.class

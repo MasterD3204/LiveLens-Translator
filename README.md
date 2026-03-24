@@ -216,12 +216,19 @@ models/diarization/
 git clone https://github.com/MasterD3204/LiveLens-Translator.git
 cd LiveLens-Translator
 
-# Build debug APK
+# Bước 1 — Tải sherpa-onnx AAR (bắt buộc, chỉ cần làm 1 lần)
+chmod +x scripts/download-sherpa-onnx.sh
+./scripts/download-sherpa-onnx.sh
+
+# Bước 2 — Build debug APK
 ./gradlew assembleDebug
 
 # Cài lên thiết bị
 ./gradlew installDebug
 ```
+
+> **Lý do cần bước 1:** sherpa-onnx không publish lên Maven Central hay JitPack.
+> AAR phải được download từ GitHub Releases và đặt vào `app/libs/` trước khi build.
 
 ### Lần đầu chạy
 

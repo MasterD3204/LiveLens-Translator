@@ -120,8 +120,10 @@ dependencies {
     implementation(libs.camerax.lifecycle)
     implementation(libs.camerax.view)
 
-    // sherpa-onnx
-    implementation(libs.sherpa.onnx)
+    // sherpa-onnx — AAR local (download bằng scripts/download-sherpa-onnx.sh)
+    // Không dùng JitPack/Maven vì sherpa-onnx không publish lên đó.
+    // File AAR phải tồn tại trong app/libs/ trước khi build.
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
 
     // MediaPipe LLM Inference
     implementation(libs.mediapipe.tasks.genai)

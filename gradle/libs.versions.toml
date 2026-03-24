@@ -6,7 +6,7 @@ hilt                    = "2.54"
 room                    = "2.7.0"
 coroutines              = "1.9.0"
 camerax                 = "1.4.1"
-sherpa-onnx             = "1.11.0"
+sherpa-onnx             = "1.12.32"
 mediapipe-tasks-genai   = "0.10.22"
 datastore               = "1.1.2"
 navigation-compose      = "2.8.6"
@@ -57,8 +57,9 @@ camerax-camera2             = { group = "androidx.camera", name = "camera-camera
 camerax-lifecycle           = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "camerax" }
 camerax-view                = { group = "androidx.camera", name = "camera-view", version.ref = "camerax" }
 
-# sherpa-onnx Android SDK
-sherpa-onnx                 = { group = "com.github.k2-fsa", name = "sherpa-onnx-android", version.ref = "sherpa-onnx" }
+# sherpa-onnx — dùng AAR local trong app/libs/ (xem scripts/download-sherpa-onnx.sh)
+# KHÔNG dùng JitPack — sherpa-onnx không publish lên Maven/JitPack
+# sherpa-onnx khai báo dưới dạng fileTree trong app/build.gradle.kts
 
 # MediaPipe LLM Inference
 mediapipe-tasks-genai       = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipe-tasks-genai" }
