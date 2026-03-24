@@ -17,6 +17,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.livelens.translator.MainActivity
@@ -86,30 +87,58 @@ class AudioCaptureService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
-        val filter = IntentFilter(ACTION_STOP)
-        registerReceiver(commandReceiver, filter, RECEIVER_NOT_EXPORTED)
-        Timber.d("AudioCaptureService created")
+        Timber.d("AudioCaptureService.onCreate() — PID=${android.os.Process.myPid()}")
+        try {
+            val filter = IntentFilter(ACTION_STOP)
+            registerReceiver(commandReceiver, filter, RECEIVER_NOT_EXPORTED)
+            Timber.d("AudioCaptureService BroadcastReceiver đã đăng ký cho ACTION_STOP")
+        } catch (e: Exception) {
+            Timber.e(e, "Lỗi khi đăng ký BroadcastReceiver trong onCreate")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        Timber.i("AudioCaptureService.onStartCommand() — action=${intent?.action}, flags=$flags, startId=$startId")
 
-        startForeground(NOTIFICATION_ID_SERVICE, buildNotification())
+        if (intent == null) {
+            Timber.w("onStartCommand nhận intent=null (hệ thống restart service?) — gọi stopSelf()")
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
-        when (intent?.action) {
+        try {
+            startForeground(NOTIFICATION_ID_SERVICE, buildNotification())
+            Timber.d("startForeground() thành công, notificationId=$NOTIFICATION_ID_SERVICE")
+        } catch (e: Exception) {
+            Timber.e(e, "startForeground() thất bại!")
+        }
+
+        when (intent.action) {
             ACTION_START_MIC -> {
+                Timber.i("→ ACTION_START_MIC nhận được, launching startMicCapture()")
                 lifecycleScope.launch { startMicCapture() }
             }
             ACTION_START_MEDIA -> {
                 val projectionData = intent.getParcelableExtra<Intent>(EXTRA_MEDIA_PROJECTION_DATA)
+                Timber.i("→ ACTION_START_MEDIA nhận được, projectionData=${if (projectionData != null) "CÓ" else "NULL"}")
                 if (projectionData != null) {
                     lifecycleScope.launch { startMediaCapture(projectionData) }
                 } else {
-                    Timber.e("Media projection data missing")
+                    Timber.e("EXTRA_MEDIA_PROJECTION_DATA bị thiếu trong ACTION_START_MEDIA — stopSelf()")
                     stopSelf()
                 }
             }
-            ACTION_STOP -> stopCapture()
+            ACTION_STOP -> {
+                Timber.i("→ ACTION_STOP nhận được qua onStartCommand")
+                stopCapture()
+            }
+            null -> {
+                Timber.w("intent.action = null — không làm gì")
+            }
+            else -> {
+                Timber.w("action không nhận dạng được: '${intent.action}'")
+            }
         }
 
         return START_NOT_STICKY
@@ -118,35 +147,79 @@ class AudioCaptureService : LifecycleService() {
     // ─── Microphone capture (Mode 1) ──────────────────────────────────────────
 
     private suspend fun startMicCapture() = withContext(Dispatchers.IO) {
-        Timber.i("Starting mic capture")
+        Timber.i("━━━ startMicCapture() BẮT ĐẦU ━━━")
         currentMode = CaptureMode.MIC
         translationManager.setMode(TranslationMode.CONVERSATION)
+        Timber.d("Đã set mode = CONVERSATION")
+
+        // Kiểm tra permission RECORD_AUDIO
+        val hasMicPermission = android.content.pm.PackageManager.PERMISSION_GRANTED ==
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                this@AudioCaptureService, android.Manifest.permission.RECORD_AUDIO
+            )
+        Timber.d("RECORD_AUDIO permission: ${if (hasMicPermission) "GRANTED ✓" else "DENIED ✗"}")
+        if (!hasMicPermission) {
+            Timber.e("Không có quyền RECORD_AUDIO — không thể ghi âm!")
+            withContext(Dispatchers.Main) { stopSelf() }
+            return@withContext
+        }
 
         // Initialize sherpa-onnx if needed
-        try { sherpaOnnxManager.initialize() } catch (e: Exception) {
-            Timber.e(e, "Failed to init sherpa-onnx")
+        Timber.d("Khởi tạo SherpaOnnxManager...")
+        try {
+            sherpaOnnxManager.initialize()
+            Timber.i("SherpaOnnxManager khởi tạo thành công ✓")
+        } catch (e: Exception) {
+            Timber.e(e, "SherpaOnnxManager khởi tạo THẤT BẠI ✗")
             withContext(Dispatchers.Main) { stopSelf() }
             return@withContext
         }
 
         val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
         val bufSize = maxOf(minBuf * BUFFER_SIZE_FACTOR, SAMPLE_RATE * 2 * 4)
+        Timber.d("AudioRecord: sampleRate=$SAMPLE_RATE, minBuf=$minBuf, bufSize=$bufSize")
 
-        val record = AudioRecord.Builder()
-            .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setSampleRate(SAMPLE_RATE)
-                    .setChannelMask(CHANNEL_CONFIG)
-                    .setEncoding(AUDIO_FORMAT)
-                    .build()
-            )
-            .setBufferSizeInBytes(bufSize)
-            .build()
+        val record = try {
+            AudioRecord.Builder()
+                .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setSampleRate(SAMPLE_RATE)
+                        .setChannelMask(CHANNEL_CONFIG)
+                        .setEncoding(AUDIO_FORMAT)
+                        .build()
+                )
+                .setBufferSizeInBytes(bufSize)
+                .build()
+        } catch (e: Exception) {
+            Timber.e(e, "Tạo AudioRecord THẤT BẠI ✗")
+            withContext(Dispatchers.Main) { stopSelf() }
+            return@withContext
+        }
+
+        Timber.d("AudioRecord state = ${record.state} (1=INITIALIZED, 0=UNINITIALIZED)")
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            Timber.e("AudioRecord KHÔNG khởi tạo được (state=${record.state}) — kiểm tra permission hoặc hardware")
+            record.release()
+            withContext(Dispatchers.Main) { stopSelf() }
+            return@withContext
+        }
 
         audioRecord = record
-        record.startRecording()
-        sherpaOnnxManager.createStream()
+        try {
+            record.startRecording()
+            Timber.i("AudioRecord.startRecording() thành công ✓ recordingState=${record.recordingState}")
+        } catch (e: Exception) {
+            Timber.e(e, "AudioRecord.startRecording() THẤT BẠI ✗")
+            record.release()
+            withContext(Dispatchers.Main) { stopSelf() }
+            return@withContext
+        }
+
+        val stream = sherpaOnnxManager.createStream()
+        Timber.d("SherpaOnnx stream tạo: ${if (stream != null) "OK ✓" else "NULL ✗"}")
+
+        Timber.i("━━━ Bắt đầu vòng lặp xử lý audio (MIC mode) ━━━")
         captureJob = lifecycleScope.launch(Dispatchers.IO) {
             processAudioLoop(record)
         }
@@ -155,36 +228,48 @@ class AudioCaptureService : LifecycleService() {
     // ─── Media playback capture (Mode 2) ──────────────────────────────────────
 
     private suspend fun startMediaCapture(projectionData: Intent) = withContext(Dispatchers.IO) {
-        Timber.i("Starting media playback capture")
+        Timber.i("━━━ startMediaCapture() BẮT ĐẦU ━━━")
         currentMode = CaptureMode.MEDIA
         translationManager.setMode(TranslationMode.MEDIA)
+        Timber.d("Đã set mode = MEDIA")
 
-        try { sherpaOnnxManager.initialize() } catch (e: Exception) {
-            Timber.e(e, "Failed to init sherpa-onnx")
+        Timber.d("Khởi tạo SherpaOnnxManager cho MEDIA mode...")
+        try {
+            sherpaOnnxManager.initialize()
+            Timber.i("SherpaOnnxManager khởi tạo thành công ✓")
+        } catch (e: Exception) {
+            Timber.e(e, "SherpaOnnxManager khởi tạo THẤT BẠI ✗")
             withContext(Dispatchers.Main) { stopSelf() }
             return@withContext
         }
 
         val projectionManager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        val projection = projectionManager.getMediaProjection(
-            android.app.Activity.RESULT_OK,
-            projectionData
-        )
-
-        if (projection == null) {
-            Timber.e("Failed to get MediaProjection")
+        Timber.d("Đang lấy MediaProjection từ projectionData...")
+        val projection = try {
+            projectionManager.getMediaProjection(android.app.Activity.RESULT_OK, projectionData)
+        } catch (e: Exception) {
+            Timber.e(e, "getMediaProjection() ném exception ✗")
             withContext(Dispatchers.Main) { stopSelf() }
             return@withContext
         }
+
+        if (projection == null) {
+            Timber.e("getMediaProjection() trả về NULL ✗ — token hết hạn hoặc bị từ chối?")
+            withContext(Dispatchers.Main) { stopSelf() }
+            return@withContext
+        }
+        Timber.i("MediaProjection lấy thành công ✓")
         mediaProjection = projection
 
         val captureConfig = AudioPlaybackCaptureConfiguration.Builder(projection)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
             .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
             .build()
+        Timber.d("AudioPlaybackCaptureConfiguration tạo xong")
 
         val minBuf = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
         val bufSize = maxOf(minBuf * BUFFER_SIZE_FACTOR, SAMPLE_RATE * 2 * 4)
+        Timber.d("AudioRecord: minBuf=$minBuf, bufSize=$bufSize")
 
         val record = try {
             AudioRecord.Builder()
@@ -199,7 +284,7 @@ class AudioCaptureService : LifecycleService() {
                 .setBufferSizeInBytes(bufSize)
                 .build()
         } catch (e: UnsupportedOperationException) {
-            Timber.e(e, "AudioPlaybackCapture not supported — app may block capture")
+            Timber.e(e, "AudioPlaybackCapture KHÔNG được hỗ trợ ✗ — app đích có thể chặn capture (FLAG_SECURE)")
             withContext(Dispatchers.Main) {
                 Toast.makeText(
                     applicationContext,
@@ -210,12 +295,38 @@ class AudioCaptureService : LifecycleService() {
             projection.stop()
             stopSelf()
             return@withContext
+        } catch (e: Exception) {
+            Timber.e(e, "Tạo AudioRecord cho media capture THẤT BẠI ✗")
+            projection.stop()
+            withContext(Dispatchers.Main) { stopSelf() }
+            return@withContext
+        }
+
+        Timber.d("AudioRecord (media) state=${record.state} (1=OK)")
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            Timber.e("AudioRecord (media) KHÔNG khởi tạo được (state=${record.state})")
+            record.release()
+            projection.stop()
+            withContext(Dispatchers.Main) { stopSelf() }
+            return@withContext
         }
 
         audioRecord = record
-        record.startRecording()
-        sherpaOnnxManager.createStream()
+        try {
+            record.startRecording()
+            Timber.i("AudioRecord (media) startRecording() ✓ recordingState=${record.recordingState}")
+        } catch (e: Exception) {
+            Timber.e(e, "AudioRecord (media) startRecording() THẤT BẠI ✗")
+            record.release()
+            projection.stop()
+            withContext(Dispatchers.Main) { stopSelf() }
+            return@withContext
+        }
 
+        val stream = sherpaOnnxManager.createStream()
+        Timber.d("SherpaOnnx stream: ${if (stream != null) "OK ✓" else "NULL ✗"}")
+
+        Timber.i("━━━ Bắt đầu vòng lặp xử lý audio (MEDIA mode) ━━━")
         captureJob = lifecycleScope.launch(Dispatchers.IO) {
             processAudioLoop(record)
         }
@@ -231,21 +342,41 @@ class AudioCaptureService : LifecycleService() {
     private suspend fun processAudioLoop(record: AudioRecord) = withContext(Dispatchers.IO) {
         val chunkSamples = SAMPLE_RATE / 10   // 100ms chunks
         val buffer = FloatArray(chunkSamples)
-        var utteranceBuffer = FloatArray(0)
+        var chunkCount = 0
+        var speechChunkCount = 0
+        var endpointCount = 0
+
+        Timber.d("processAudioLoop() khởi động: chunkSamples=$chunkSamples, recordingState=${record.recordingState}")
 
         while (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
             val read = record.read(buffer, 0, chunkSamples, AudioRecord.READ_BLOCKING)
-            if (read <= 0) continue
+            if (read <= 0) {
+                Timber.w("AudioRecord.read() trả về $read — bỏ qua chunk này")
+                continue
+            }
 
+            chunkCount++
             val chunk = buffer.copyOf(read)
+
+            // Log định kỳ mỗi 50 chunks (~5 giây) để tránh spam
+            if (chunkCount % 50 == 0) {
+                Timber.d("Audio loop alive: chunk #$chunkCount, speechChunks=$speechChunkCount, endpoints=$endpointCount, mode=$currentMode")
+            }
 
             // Feed to VAD
             val hasSpeech = sherpaOnnxManager.feedVad(chunk)
+            if (hasSpeech) speechChunkCount++
+
+            // Log khi phát hiện speech lần đầu trong mỗi nhóm 50
+            if (hasSpeech && chunkCount % 50 == 1) {
+                Timber.d("VAD: phát hiện giọng nói tại chunk #$chunkCount")
+            }
 
             // Accumulate for diarization buffer (Mode 1 only)
             if (currentMode == CaptureMode.MIC) {
                 speakerBuffer.addAll(chunk.toList())
                 if (speakerBuffer.size >= DIARIZATION_BUFFER_SIZE) {
+                    Timber.d("Diarization buffer đầy (${speakerBuffer.size} samples) — chạy diarization")
                     val diaBuffer = speakerBuffer.toFloatArray()
                     speakerBuffer.clear()
                     runDiarization(diaBuffer)
@@ -258,22 +389,26 @@ class AudioCaptureService : LifecycleService() {
 
             // Check for STT endpoint
             if (sherpaOnnxManager.isEndpointDetected()) {
+                endpointCount++
                 val text = sherpaOnnxManager.getCurrentResult().trim()
                 sherpaOnnxManager.resetStream()
+                Timber.d("STT endpoint #$endpointCount: text='$text' (length=${text.length})")
 
                 if (text.isNotEmpty()) {
                     val label = if (currentMode == CaptureMode.MIC) {
                         speakerIdToLabel[currentSpeakerId] ?: "A"
                     } else null
-                    Timber.d("STT endpoint: text='$text', speaker=$label")
+                    Timber.i("✔ STT kết quả: '$text', speaker=$label — gửi đến TranslationManager")
                     translationManager.translateText(
                         text = text,
                         speakerLabel = label
                     )
+                } else {
+                    Timber.d("STT endpoint nhưng text rỗng — bỏ qua")
                 }
             }
         }
-        Timber.d("Audio processing loop ended")
+        Timber.i("━━━ processAudioLoop() KẾT THÚC: tổng chunk=$chunkCount, speechChunks=$speechChunkCount, endpoints=$endpointCount, recordingState=${record.recordingState} ━━━")
     }
 
     private suspend fun runDiarization(samples: FloatArray) {
@@ -297,21 +432,28 @@ class AudioCaptureService : LifecycleService() {
     // ─── Stop ─────────────────────────────────────────────────────────────────
 
     private fun stopCapture() {
-        Timber.i("Stopping audio capture")
+        Timber.i("stopCapture() gọi — currentMode=$currentMode, captureJob=${if (captureJob != null) "active" else "null"}")
         captureJob?.cancel()
         captureJob = null
         try {
+            val state = audioRecord?.recordingState
+            Timber.d("Dừng AudioRecord (recordingState=$state)...")
             audioRecord?.stop()
             audioRecord?.release()
+            Timber.d("AudioRecord dừng và giải phóng ✓")
         } catch (e: Exception) {
-            Timber.w(e, "Error stopping AudioRecord")
+            Timber.w(e, "Lỗi khi dừng AudioRecord")
         }
         audioRecord = null
-        mediaProjection?.stop()
-        mediaProjection = null
+        if (mediaProjection != null) {
+            Timber.d("Dừng MediaProjection...")
+            mediaProjection?.stop()
+            mediaProjection = null
+        }
         currentMode = CaptureMode.IDLE
         speakerBuffer.clear()
         speakerIdToLabel.clear()
+        Timber.i("stopCapture() hoàn tất — gọi stopSelf()")
         stopSelf()
     }
 
@@ -345,6 +487,6 @@ class AudioCaptureService : LifecycleService() {
         super.onDestroy()
         try { unregisterReceiver(commandReceiver) } catch (_: Exception) {}
         stopCapture()
-        Timber.d("AudioCaptureService destroyed")
+        Timber.i("AudioCaptureService.onDestroy() — service đã bị hủy")
     }
 }

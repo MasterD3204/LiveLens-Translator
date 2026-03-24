@@ -23,11 +23,22 @@ class MainApplication : Application() {
             Timber.plant(Timber.DebugTree())
         }
 
+        Timber.i("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        Timber.i("LiveLens Translator — Application.onCreate()")
+        Timber.i("Package: ${packageName}")
+        Timber.i("Version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+        Timber.i("Build type: ${BuildConfig.BUILD_TYPE}")
+        Timber.i("Android SDK: ${android.os.Build.VERSION.SDK_INT} (${android.os.Build.VERSION.RELEASE})")
+        Timber.i("Device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+        Timber.i("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
         // Create notification channels
         createNotificationChannels()
+        Timber.d("Notification channels đã tạo")
 
         // Initialize Gemma on background thread to avoid cold-start delay
         // The manager handles lazy init gracefully if models aren't yet downloaded
+        Timber.d("Bắt đầu khởi tạo Gemma bất đồng bộ từ Application.onCreate()...")
         gemmaTranslateManager.initializeAsync()
     }
 
@@ -44,6 +55,9 @@ class MainApplication : Application() {
 
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.createNotificationChannels(listOf(serviceChannel))
+            Timber.d("NotificationChannel '$CHANNEL_SERVICE' tạo thành công ✓")
+        } else {
+            Timber.d("SDK < O — không cần tạo NotificationChannel")
         }
     }
 

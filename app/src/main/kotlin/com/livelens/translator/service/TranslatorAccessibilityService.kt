@@ -39,12 +39,32 @@ class TranslatorAccessibilityService : AccessibilityService() {
 
     private val commandReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
+            Timber.d("commandReceiver.onReceive: action=${intent.action}")
             when (intent.action) {
-                ACTION_START_CONVERSATION -> overlayController?.showAndSetMode(TranslationMode.CONVERSATION)
-                ACTION_START_MEDIA       -> overlayController?.showAndSetMode(TranslationMode.MEDIA)
-                ACTION_START_IMAGE       -> overlayController?.showAndSetMode(TranslationMode.IMAGE)
-                ACTION_STOP_OVERLAY      -> overlayController?.hide()
-                ACTION_SERVICE_STATUS    -> sendStatusBroadcast()
+                ACTION_START_CONVERSATION -> {
+                    Timber.i("→ ACTION_START_CONVERSATION nhận được — gọi showAndSetMode(CONVERSATION)")
+                    overlayController?.showAndSetMode(TranslationMode.CONVERSATION)
+                        ?: Timber.e("overlayController = null khi nhận ACTION_START_CONVERSATION!")
+                }
+                ACTION_START_MEDIA       -> {
+                    Timber.i("→ ACTION_START_MEDIA nhận được — gọi showAndSetMode(MEDIA)")
+                    overlayController?.showAndSetMode(TranslationMode.MEDIA)
+                        ?: Timber.e("overlayController = null khi nhận ACTION_START_MEDIA!")
+                }
+                ACTION_START_IMAGE       -> {
+                    Timber.i("→ ACTION_START_IMAGE nhận được — gọi showAndSetMode(IMAGE)")
+                    overlayController?.showAndSetMode(TranslationMode.IMAGE)
+                        ?: Timber.e("overlayController = null khi nhận ACTION_START_IMAGE!")
+                }
+                ACTION_STOP_OVERLAY      -> {
+                    Timber.i("→ ACTION_STOP_OVERLAY nhận được — gọi hide()")
+                    overlayController?.hide()
+                }
+                ACTION_SERVICE_STATUS    -> {
+                    Timber.d("→ ACTION_SERVICE_STATUS nhận được — phản hồi trạng thái")
+                    sendStatusBroadcast()
+                }
+                else -> Timber.w("commandReceiver nhận action không biết: '${intent.action}'")
             }
         }
     }
@@ -73,33 +93,51 @@ class TranslatorAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        Timber.i("TranslatorAccessibilityService connected")
+        Timber.i("━━━ TranslatorAccessibilityService.onServiceConnected() ━━━ PID=${android.os.Process.myPid()}")
 
         // Configure which accessibility events we care about (minimal)
-        serviceInfo = serviceInfo.apply {
-            eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-            feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
-            flags = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-            notificationTimeout = 100
+        try {
+            serviceInfo = serviceInfo.apply {
+                eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+                feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
+                flags = AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+                notificationTimeout = 100
+            }
+            Timber.d("AccessibilityServiceInfo cấu hình thành công ✓")
+        } catch (e: Exception) {
+            Timber.e(e, "Cấu hình AccessibilityServiceInfo THẤT BẠI ✗")
         }
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        Timber.d("WindowManager lấy: ${if (windowManager != null) "OK ✓" else "NULL ✗"}")
+
         setupOverlay()
         registerCommandReceiver()
     }
 
     private fun setupOverlay() {
-        val wm = windowManager ?: return
+        val wm = windowManager ?: run {
+            Timber.e("setupOverlay() — windowManager = null, bỏ qua!")
+            return
+        }
+        // Kiểm tra quyền overlay
+        val hasOverlayPermission = android.provider.Settings.canDrawOverlays(this)
+        Timber.d("SYSTEM_ALERT_WINDOW (overlay) permission: ${if (hasOverlayPermission) "GRANTED ✓" else "DENIED ✗"}")
+        if (!hasOverlayPermission) {
+            Timber.e("Không có quyền overlay (SYSTEM_ALERT_WINDOW) — FloatingOverlayController sẽ không hoạt động!")
+        }
+
         try {
+            Timber.d("Tạo FloatingOverlayController...")
             overlayController = FloatingOverlayController(
                 context = this,
                 windowManager = wm,
                 translationManager = translationManager
             )
             overlayController?.create()
-            Timber.d("Overlay created")
+            Timber.i("FloatingOverlayController tạo thành công ✓ overlayController=$overlayController")
         } catch (e: Exception) {
-            Timber.e(e, "Failed to create overlay")
+            Timber.e(e, "FloatingOverlayController tạo THẤT BẠI ✗")
         }
     }
 
@@ -111,7 +149,12 @@ class TranslatorAccessibilityService : AccessibilityService() {
             addAction(ACTION_STOP_OVERLAY)
             addAction(ACTION_SERVICE_STATUS)
         }
-        registerReceiver(commandReceiver, filter, RECEIVER_NOT_EXPORTED)
+        try {
+            registerReceiver(commandReceiver, filter, RECEIVER_NOT_EXPORTED)
+            Timber.d("BroadcastReceiver đăng ký thành công ✓ — lắng nghe các action overlay")
+        } catch (e: Exception) {
+            Timber.e(e, "Đăng ký BroadcastReceiver THẤT BẠI ✗")
+        }
     }
 
     private fun sendStatusBroadcast() {
@@ -126,11 +169,11 @@ class TranslatorAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
-        Timber.w("AccessibilityService interrupted")
+        Timber.w("AccessibilityService.onInterrupt() — service bị gián đoạn bởi hệ thống")
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
-        Timber.i("TranslatorAccessibilityService unbound")
+        Timber.i("TranslatorAccessibilityService.onUnbind() — service bị ngắt kết nối")
         cleanup()
         return super.onUnbind(intent)
     }
@@ -138,7 +181,7 @@ class TranslatorAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         cleanup()
-        Timber.i("TranslatorAccessibilityService destroyed")
+        Timber.i("TranslatorAccessibilityService.onDestroy() — service đã hủy")
     }
 
     private fun cleanup() {

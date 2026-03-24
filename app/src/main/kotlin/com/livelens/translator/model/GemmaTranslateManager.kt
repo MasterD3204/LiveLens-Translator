@@ -63,29 +63,48 @@ class GemmaTranslateManager(
     // ─── Initialization ───────────────────────────────────────────────────────
 
     fun initializeAsync() {
-        if (llmInference != null || isInitializing) return
-        if (!modelLoader.isGemmaReady()) return
+        Timber.d("GemmaTranslateManager.initializeAsync(): llmInference=${if (llmInference != null) "đã có" else "null"}, isInitializing=$isInitializing, isGemmaReady=${modelLoader.isGemmaReady()}")
+        if (llmInference != null || isInitializing) {
+            Timber.d("initializeAsync() bỏ qua — đã khởi tạo hoặc đang khởi tạo")
+            return
+        }
+        if (!modelLoader.isGemmaReady()) {
+            Timber.w("initializeAsync() bỏ qua — Gemma model chưa sẵn sàng (resolveGemmaTaskFile() = null)")
+            return
+        }
+        Timber.i("Bắt đầu khởi tạo Gemma bất đồng bộ...")
         CoroutineScope(Dispatchers.IO + SupervisorJob()).launch { initializeSync() }
     }
 
     suspend fun initializeSync() = withContext(Dispatchers.IO) {
-        if (llmInference != null || isInitializing) return@withContext
-        val taskFile = modelLoader.resolveGemmaTaskFile() ?: run {
-            Timber.w("Gemma .task file not found")
+        if (llmInference != null || isInitializing) {
+            Timber.d("initializeSync() bỏ qua — đã khởi tạo hoặc đang khởi tạo")
             return@withContext
         }
+        val taskFile = modelLoader.resolveGemmaTaskFile() ?: run {
+            Timber.w("initializeSync() — Gemma .task file không tìm thấy ở bất kỳ vị trí nào!")
+            Timber.w("  internal: ${modelLoader.gemmaTaskFile.absolutePath} (exists=${modelLoader.gemmaTaskFile.exists()})")
+            return@withContext
+        }
+        Timber.i("━━━ GemmaTranslateManager.initializeSync() BẮT ĐẦU ━━━")
+        Timber.d("Task file: ${taskFile.absolutePath}")
+        Timber.d("Task file size: ${taskFile.length() / 1024 / 1024} MB")
         isInitializing = true
+        val startMs = System.currentTimeMillis()
         try {
-            // ✅ API mới: KHÔNG dùng setResultListener ở đây nữa
             val options = LlmInferenceOptions.builder()
                 .setModelPath(taskFile.absolutePath)
                 .setMaxTopK(MAX_TOP_K)
                 .setMaxNumImages(MAX_NUM_IMAGES)
                 .build()
+            Timber.d("LlmInferenceOptions tạo xong: maxTopK=$MAX_TOP_K, maxNumImages=$MAX_NUM_IMAGES")
+            Timber.d("Đang tạo LlmInference (có thể mất vài giây)...")
             llmInference = LlmInference.createFromOptions(context, options)
-            Timber.i("Gemma initialized: ${taskFile.name}")
+            val elapsed = System.currentTimeMillis() - startMs
+            Timber.i("━━━ Gemma khởi tạo THÀNH CÔNG ✓ trong ${elapsed}ms — ${taskFile.name} ━━━")
         } catch (e: Exception) {
-            Timber.e(e, "Gemma init failed")
+            val elapsed = System.currentTimeMillis() - startMs
+            Timber.e(e, "━━━ Gemma khởi tạo THẤT BẠI ✗ sau ${elapsed}ms ━━━")
         } finally {
             isInitializing = false
         }
@@ -98,25 +117,32 @@ class GemmaTranslateManager(
      * Dùng generateResponseAsync() + setResultListener.
      */
     fun translateText(text: String): Flow<String> = callbackFlow {
+        Timber.d("GemmaTranslateManager.translateText(): text='${text.take(50)}...', llmInference=${if (llmInference != null) "sẵn sàng ✓" else "null ✗"}")
         val llm = llmInference ?: run {
+            Timber.e("translateText() thất bại — llmInference chưa khởi tạo! isInitializing=$isInitializing")
             close(IllegalStateException("LLM chưa khởi tạo"))
             return@callbackFlow
         }
 
         mutex.withLock {
+            Timber.d("translateText() bắt đầu generateResponseAsync cho: '${text.take(30)}'")
             activeChannel = channel
             try {
                 withContext(Dispatchers.IO) {
                     llm.generateResponseAsync(TEXT_PROMPT.format(text.trim()))
                 }
+                Timber.d("generateResponseAsync() đã gọi thành công — đang chờ tokens...")
             } catch (e: Exception) {
-                Timber.e(e, "generateResponseAsync thất bại")
+                Timber.e(e, "generateResponseAsync() THẤT BẠI ✗ cho text='${text.take(30)}'")
                 activeChannel = null
                 close(e)
                 return@withLock
             }
             // Chờ cho đến khi listener gọi channel.close() (done=true)
-            awaitClose { activeChannel = null }
+            awaitClose {
+                Timber.d("translateText() callbackFlow đóng cho: '${text.take(30)}'")
+                activeChannel = null
+            }
         }
     }.flowOn(Dispatchers.IO)
 

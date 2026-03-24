@@ -90,15 +90,18 @@ class FloatingOverlayController(
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
     fun create() {
+        Timber.d("FloatingOverlayController.create() bắt đầu")
         savedStateController.performRestore(null)
         lifecycleRegistry.currentState = Lifecycle.State.CREATED
 
         createBubble()
         lifecycleRegistry.currentState = Lifecycle.State.STARTED
         lifecycleRegistry.currentState = Lifecycle.State.RESUMED
+        Timber.d("FloatingOverlayController.create() hoàn tất — lifecycle=${lifecycleRegistry.currentState}")
     }
 
     private fun createBubble() {
+        Timber.d("createBubble() bắt đầu")
         val composeView = ComposeView(context).apply {
             setViewTreeLifecycleOwner(this@FloatingOverlayController)
             setViewTreeSavedStateRegistryOwner(this@FloatingOverlayController)
@@ -118,13 +121,14 @@ class FloatingOverlayController(
         try {
             windowManager.addView(composeView, lp)
             bubbleView = composeView
-            Timber.d("Bubble view added")
+            Timber.d("Bubble view thêm vào WindowManager thành công ✓")
         } catch (e: Exception) {
-            Timber.e(e, "Failed to add bubble view")
+            Timber.e(e, "Thêm bubble view vào WindowManager THẤT BẠI ✗")
         }
     }
 
     private fun createOverlayCard(opacity: Float) {
+        Timber.d("createOverlayCard() opacity=$opacity, currentMode=$currentMode")
         val composeView = ComposeView(context).apply {
             setViewTreeLifecycleOwner(this@FloatingOverlayController)
             setViewTreeSavedStateRegistryOwner(this@FloatingOverlayController)
@@ -134,6 +138,7 @@ class FloatingOverlayController(
                         translationManager = translationManager,
                         currentMode = currentMode,
                         onModeChange = { mode ->
+                            Timber.d("Overlay: mode thay đổi sang $mode")
                             currentMode = mode
                             translationManager.setMode(mode)
                         },
@@ -146,9 +151,9 @@ class FloatingOverlayController(
         try {
             windowManager.addView(composeView, overlayCardLayoutParams(opacity))
             overlayCardView = composeView
-            Timber.d("Overlay card added")
+            Timber.d("Overlay card thêm vào WindowManager thành công ✓")
         } catch (e: Exception) {
-            Timber.e(e, "Failed to add overlay card")
+            Timber.e(e, "Thêm overlay card vào WindowManager THẤT BẠI ✗")
         }
     }
 
@@ -178,16 +183,19 @@ class FloatingOverlayController(
     // ─── State control ────────────────────────────────────────────────────────
 
     fun showAndSetMode(mode: TranslationMode) {
+        Timber.i("showAndSetMode($mode) — isExpanded=$isExpanded, overlayCardView=${if (overlayCardView != null) "exists" else "null"}")
         currentMode = mode
         if (!isExpanded) expand()
         // Update the overlay card content
         overlayCardView?.let {
+            Timber.d("showAndSetMode() — cập nhật nội dung overlay card")
             (it as? ComposeView)?.setContent {
                 LiveLensTheme {
                     TranslationOverlayCard(
                         translationManager = translationManager,
                         currentMode = currentMode,
                         onModeChange = { m ->
+                            Timber.d("Overlay: mode thay đổi sang $m")
                             currentMode = m
                             translationManager.setMode(m)
                         },
@@ -195,35 +203,41 @@ class FloatingOverlayController(
                     )
                 }
             }
-        }
+        } ?: Timber.w("showAndSetMode() — overlayCardView null sau khi expand()")
     }
 
     private fun toggleExpanded() {
+        Timber.d("toggleExpanded() — isExpanded=$isExpanded")
         if (isExpanded) collapse() else expand()
     }
 
     private fun expand(opacity: Float = 0.75f) {
+        Timber.d("expand() — overlayCardView=${if (overlayCardView != null) "exists" else "null"}")
         isExpanded = true
         if (overlayCardView == null) {
             createOverlayCard(opacity)
         } else {
             overlayCardView?.visibility = View.VISIBLE
+            Timber.d("expand() — overlay card visibility = VISIBLE")
         }
         refreshBubble()
     }
 
     fun collapse() {
+        Timber.d("collapse() — isExpanded=$isExpanded")
         isExpanded = false
         overlayCardView?.visibility = View.GONE
         refreshBubble()
     }
 
     fun hide() {
+        Timber.d("hide() — ẩn bubble và overlay card")
         collapse()
         bubbleView?.visibility = View.GONE
     }
 
     fun show() {
+        Timber.d("show() — hiện bubble")
         bubbleView?.visibility = View.VISIBLE
     }
 

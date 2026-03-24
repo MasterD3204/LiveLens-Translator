@@ -44,16 +44,59 @@ class SherpaOnnxManager(
     }
 
     suspend fun initialize() = withContext(Dispatchers.IO) {
-        if (isInitialized) return@withContext
+        if (isInitialized) {
+            Timber.d("SherpaOnnxManager.initialize() — đã khởi tạo rồi, bỏ qua")
+            return@withContext
+        }
+        Timber.i("━━━ SherpaOnnxManager.initialize() BẮT ĐẦU ━━━")
         try {
-            if (modelLoader.isVadReady()) initVad()
-            if (modelLoader.isSttReady()) initStt()
-            if (modelLoader.isTtsReady()) initTts()
-            if (modelLoader.isDiarizationReady()) initDiarization()
+            val vadReady = modelLoader.isVadReady()
+            val sttReady = modelLoader.isSttReady()
+            val ttsReady = modelLoader.isTtsReady()
+            val diaReady = modelLoader.isDiarizationReady()
+            Timber.d("Model status: VAD=$vadReady, STT=$sttReady, TTS=$ttsReady, Diarization=$diaReady")
+            Timber.d("VAD path: ${modelLoader.vadModelFile.absolutePath} (exists=${modelLoader.vadModelFile.exists()}, size=${modelLoader.vadModelFile.length()}B)")
+            Timber.d("STT encoder: ${modelLoader.sttEncoderFile.absolutePath} (exists=${modelLoader.sttEncoderFile.exists()}, size=${modelLoader.sttEncoderFile.length()/1024}KB)")
+            Timber.d("STT decoder: ${modelLoader.sttDecoderFile.absolutePath} (exists=${modelLoader.sttDecoderFile.exists()}, size=${modelLoader.sttDecoderFile.length()/1024}KB)")
+            Timber.d("STT joiner: ${modelLoader.sttJoinerFile.absolutePath} (exists=${modelLoader.sttJoinerFile.exists()}, size=${modelLoader.sttJoinerFile.length()/1024}KB)")
+            Timber.d("STT tokens: ${modelLoader.sttTokensFile.absolutePath} (exists=${modelLoader.sttTokensFile.exists()}, size=${modelLoader.sttTokensFile.length()}B)")
+
+            if (vadReady) {
+                Timber.d("Đang khởi tạo VAD...")
+                initVad()
+                Timber.i("VAD khởi tạo thành công ✓")
+            } else {
+                Timber.w("VAD model chưa sẵn sàng — bỏ qua initVad()")
+            }
+
+            if (sttReady) {
+                Timber.d("Đang khởi tạo STT (Zipformer)...")
+                initStt()
+                Timber.i("STT khởi tạo thành công ✓")
+            } else {
+                Timber.w("STT model chưa sẵn sàng — bỏ qua initStt()")
+            }
+
+            if (ttsReady) {
+                Timber.d("Đang khởi tạo TTS (VITS)...")
+                initTts()
+                Timber.i("TTS khởi tạo thành công ✓")
+            } else {
+                Timber.d("TTS model không có — bỏ qua (optional)")
+            }
+
+            if (diaReady) {
+                Timber.d("Đang khởi tạo Diarization...")
+                initDiarization()
+                Timber.i("Diarization khởi tạo thành công ✓")
+            } else {
+                Timber.d("Diarization model không có — bỏ qua (optional)")
+            }
+
             isInitialized = true
-            Timber.i("SherpaOnnxManager initialized")
+            Timber.i("━━━ SherpaOnnxManager khởi tạo HOÀN TẤT: VAD=${vad != null}, STT=${recognizer != null}, TTS=${tts != null}, Diarization=${diarization != null} ━━━")
         } catch (e: Exception) {
-            Timber.e(e, "SherpaOnnxManager init failed")
+            Timber.e(e, "━━━ SherpaOnnxManager.initialize() THẤT BẠI ✗ ━━━")
             throw e
         }
     }
@@ -61,6 +104,7 @@ class SherpaOnnxManager(
     // ─── Init ────────────────────────────────────────────────────────────────
 
     private fun initVad() {
+        Timber.d("initVad(): model=${modelLoader.vadModelFile.absolutePath}")
         vad = Vad(
             config = VadModelConfig(
                 sileroVadModelConfig = SileroVadModelConfig(
@@ -77,10 +121,11 @@ class SherpaOnnxManager(
                 debug       = false
             )
         )
-        Timber.d("VAD initialized")
+        Timber.d("VAD object tạo: ${if (vad != null) "OK ✓" else "NULL ✗"}")
     }
 
     private fun initStt() {
+        Timber.d("initStt(): encoder=${modelLoader.sttEncoderFile.absolutePath}")
         recognizer = OnlineRecognizer(
             config = OnlineRecognizerConfig(
                 featConfig = FeatureConfig(
@@ -108,7 +153,7 @@ class SherpaOnnxManager(
                 maxActivePaths = 4
             )
         )
-        Timber.d("STT initialized")
+        Timber.d("OnlineRecognizer tạo: ${if (recognizer != null) "OK ✓" else "NULL ✗"}")
     }
 
     private fun initTts() {

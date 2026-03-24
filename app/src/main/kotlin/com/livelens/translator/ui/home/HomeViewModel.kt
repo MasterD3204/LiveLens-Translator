@@ -33,23 +33,31 @@ class HomeViewModel @Inject constructor(
 
     private val serviceStatusReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
+            Timber.d("HomeViewModel: serviceStatusReceiver nhận intent action=${intent.action}")
             if (intent.action == TranslatorAccessibilityService.ACTION_SERVICE_STATUS_REPLY) {
                 val isRunning = intent.getBooleanExtra(
                     TranslatorAccessibilityService.EXTRA_SERVICE_RUNNING, false
                 )
+                Timber.i("HomeViewModel: service running = $isRunning (từ STATUS_REPLY)")
                 _uiState.value = _uiState.value.copy(serviceRunning = isRunning)
             }
         }
     }
 
     init {
+        Timber.d("HomeViewModel.init() — bắt đầu khởi tạo")
         loadRecentTranslations()
         loadModelStatus()
-        context.registerReceiver(
-            serviceStatusReceiver,
-            IntentFilter(TranslatorAccessibilityService.ACTION_SERVICE_STATUS_REPLY),
-            Context.RECEIVER_NOT_EXPORTED
-        )
+        try {
+            context.registerReceiver(
+                serviceStatusReceiver,
+                IntentFilter(TranslatorAccessibilityService.ACTION_SERVICE_STATUS_REPLY),
+                Context.RECEIVER_NOT_EXPORTED
+            )
+            Timber.d("HomeViewModel: đăng ký serviceStatusReceiver thành công ✓")
+        } catch (e: Exception) {
+            Timber.e(e, "HomeViewModel: đăng ký serviceStatusReceiver THẤT BẠI ✗")
+        }
         queryServiceStatus()
     }
 
@@ -66,18 +74,29 @@ class HomeViewModel @Inject constructor(
 
     private fun loadModelStatus() {
         viewModelScope.launch {
-            modelLoader.checkAllModels()
-            val status = modelLoader.getModelStatusInfo()
-            _uiState.value = _uiState.value.copy(modelStatusInfo = status)
+            Timber.d("HomeViewModel: loadModelStatus() bắt đầu")
+            try {
+                modelLoader.checkAllModels()
+                val status = modelLoader.getModelStatusInfo()
+                Timber.i("HomeViewModel: Model status — STT=${status.sttReady}, VAD=${status.vadReady}, TTS=${status.ttsReady}, Dia=${status.diarizationReady}, Gemma=${status.gemmaReady}")
+                Timber.d("HomeViewModel: Gemma file='${status.gemmaFileName}', inDownloads=${status.gemmaInDownloads}, sttSizeMb=${status.sttSizeMb}MB, gemmaSizeMb=${status.gemmaSizeMb}MB")
+                _uiState.value = _uiState.value.copy(modelStatusInfo = status)
+            } catch (e: Exception) {
+                Timber.e(e, "HomeViewModel: loadModelStatus() THẤT BẠI ✗")
+            }
         }
     }
 
     private fun queryServiceStatus() {
         val isEnabled = TranslatorAccessibilityService.isEnabled(context)
+        Timber.d("HomeViewModel: queryServiceStatus() — TranslatorAccessibilityService enabled=$isEnabled")
         _uiState.value = _uiState.value.copy(serviceRunning = isEnabled)
         if (isEnabled) {
+            Timber.d("HomeViewModel: gửi ACTION_SERVICE_STATUS broadcast để hỏi trạng thái overlay")
             val statusIntent = Intent(TranslatorAccessibilityService.ACTION_SERVICE_STATUS)
             context.sendBroadcast(statusIntent)
+        } else {
+            Timber.w("HomeViewModel: TranslatorAccessibilityService CHƯA được bật trong Settings")
         }
     }
 
