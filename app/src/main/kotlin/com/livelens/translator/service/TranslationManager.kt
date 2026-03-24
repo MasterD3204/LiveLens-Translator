@@ -19,8 +19,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import timber.log.Timber
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Central translation manager.
@@ -31,8 +29,7 @@ import javax.inject.Singleton
  * - Manages active translation sentences shown in the overlay
  * - Persists translations to the Room database
  */
-@Singleton
-class TranslationManager @Inject constructor(
+class TranslationManager(
     private val gemmaTranslateManager: GemmaTranslateManager,
     private val sherpaOnnxManager: SherpaOnnxManager,
     private val translationRepository: TranslationRepository

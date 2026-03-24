@@ -4,8 +4,6 @@ import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Wrapper quản lý sherpa-onnx: VAD, STT (Zipformer), TTS (Piper), Speaker Diarization.
@@ -15,8 +13,7 @@ import javax.inject.Singleton
  *
  * Để thêm AAR: chạy scripts/download-sherpa-onnx.sh trước khi build.
  */
-@Singleton
-class SherpaOnnxManager @Inject constructor(
+class SherpaOnnxManager(
     private val context: Context,
     private val modelLoader: ModelLoader
 ) {

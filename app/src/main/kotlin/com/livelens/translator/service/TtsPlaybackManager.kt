@@ -19,6 +19,8 @@ import javax.inject.Singleton
  * Manages TTS (Text-to-Speech) playback of Vietnamese translations.
  * Reads settings to determine if TTS is enabled and at what speed.
  * Uses the Piper model via SherpaOnnxManager.
+ *
+ * Provided by ServiceModule via @Provides — no duplicate @Inject constructor.
  */
 @Singleton
 class TtsPlaybackManager @Inject constructor(

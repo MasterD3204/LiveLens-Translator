@@ -6,6 +6,32 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// ─── Auto-download sherpa-onnx AAR ──────────────────────────────────────────
+// sherpa-onnx không có trên Maven/JitPack — phải lấy từ GitHub Releases.
+// Task này chạy tự động trước khi build, chỉ download 1 lần nếu chưa có.
+val sherpaVersion = "1.12.32"
+val sherpaAarFile = layout.projectDirectory.file("libs/sherpa-onnx-$sherpaVersion.aar")
+
+val downloadSherpaOnnx by tasks.registering {
+    outputs.file(sherpaAarFile)
+    onlyIf { !sherpaAarFile.asFile.exists() }
+    doLast {
+        val url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/" +
+                  "v$sherpaVersion/sherpa-onnx-$sherpaVersion.aar"
+        sherpaAarFile.asFile.parentFile.mkdirs()
+        println("Downloading sherpa-onnx $sherpaVersion AAR (~30 MB)...")
+        java.net.URI(url).toURL().openStream().use { input ->
+            sherpaAarFile.asFile.outputStream().use { output -> input.copyTo(output) }
+        }
+        println("sherpa-onnx AAR ready: ${sherpaAarFile.asFile.name}")
+    }
+}
+
+tasks.configureEach {
+    if (name == "preBuild") dependsOn(downloadSherpaOnnx)
+}
+// ────────────────────────────────────────────────────────────────────────────
+
 android {
     namespace = "com.livelens.translator"
     compileSdk = 35

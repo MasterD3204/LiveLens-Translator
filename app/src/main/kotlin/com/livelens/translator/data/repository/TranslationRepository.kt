@@ -4,11 +4,8 @@ import com.livelens.translator.data.db.TranslationDao
 import com.livelens.translator.data.db.TranslationEntity
 import com.livelens.translator.model.TranslationMode
 import kotlinx.coroutines.flow.Flow
-import javax.inject.Inject
-import javax.inject.Singleton
 
-@Singleton
-class TranslationRepository @Inject constructor(
+class TranslationRepository(
     private val dao: TranslationDao
 ) {
     companion object {

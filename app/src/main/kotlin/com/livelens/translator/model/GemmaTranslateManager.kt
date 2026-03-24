@@ -13,8 +13,6 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Wrapper quanh MediaPipe LLM Inference API (Gemma Translate).
@@ -22,8 +20,7 @@ import javax.inject.Singleton
  * Dùng reflection để tránh lỗi compile khi dependency chưa được resolve.
  * Khi mediapipe-tasks-genai có trong classpath, mọi thứ hoạt động bình thường.
  */
-@Singleton
-class GemmaTranslateManager @Inject constructor(
+class GemmaTranslateManager(
     private val context: Context,
     private val modelLoader: ModelLoader
 ) {

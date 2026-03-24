@@ -8,8 +8,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Manages model file discovery, validation, and download progress tracking.
@@ -23,8 +21,7 @@ import javax.inject.Singleton
  * Khi tìm thấy ở Download hoặc external, file sẽ được COPY vào internal
  * storage để dùng lâu dài (tránh phụ thuộc vào quyền READ_EXTERNAL_STORAGE).
  */
-@Singleton
-class ModelLoader @Inject constructor(
+class ModelLoader(
     private val context: Context
 ) {
     val modelsDir: File get() = File(context.filesDir, "models").also { it.mkdirs() }
