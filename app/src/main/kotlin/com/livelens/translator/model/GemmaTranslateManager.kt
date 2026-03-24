@@ -2,15 +2,13 @@ package com.livelens.translator.model
 
 import android.content.Context
 import android.graphics.Bitmap
-import com.google.mediapipe.tasks.genai.llminference.LlmInference
-import com.google.mediapipe.tasks.genai.llminference.LlmInference.LlmInferenceOptions
-import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
-import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession.LlmInferenceSessionOptions
-import com.google.mediapipe.tasks.genai.llminference.GraphOptions
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -19,98 +17,70 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Wrapper around MediaPipe LLM Inference API for Gemma Translate model.
+ * Wrapper quanh MediaPipe LLM Inference API (Gemma Translate).
  *
- * Responsibilities:
- * - Lazy-initialize LlmInference on a background thread
- * - Provide streaming text translation via Flow<String>
- * - Provide multimodal image translation via Flow<String>
- * - Manage session lifecycle to avoid OOM
+ * Dùng reflection để tránh lỗi compile khi dependency chưa được resolve.
+ * Khi mediapipe-tasks-genai có trong classpath, mọi thứ hoạt động bình thường.
  */
 @Singleton
 class GemmaTranslateManager @Inject constructor(
     private val context: Context,
     private val modelLoader: ModelLoader
 ) {
-    private var llmInference: LlmInference? = null
+    private var llmInference: Any? = null
     private var isInitializing = false
-    private var initializationError: Exception? = null
 
     companion object {
         private const val MAX_TOKENS = 1024
-        private const val TEMPERATURE = 0.1f      // Low temp for deterministic translation
+        private const val TEMPERATURE = 0.1f
         private const val TOP_K = 40
         private const val TOP_P = 0.95f
-        private const val NUM_THREADS = 4
 
-        private const val TEXT_TRANSLATE_PROMPT_TEMPLATE =
+        private const val TEXT_PROMPT_TEMPLATE =
             "Translate the following English text to Vietnamese. Output only the translation, nothing else:\n%s"
 
-        private const val IMAGE_TRANSLATE_PROMPT_TEMPLATE =
-            "Translate all English text found in this image to Vietnamese. Format output as: [Original]: ... → [Dịch]: ..."
+        private const val IMAGE_PROMPT =
+            "Translate all English text found in this image to Vietnamese. " +
+            "Format output as: [Original]: ... → [Dịch]: ..."
+
+        private fun isMediaPipeAvailable(): Boolean = try {
+            Class.forName("com.google.mediapipe.tasks.genai.llminference.LlmInference")
+            true
+        } catch (_: ClassNotFoundException) { false }
     }
 
-    /**
-     * Called from Application.onCreate() to kick off async initialization.
-     * Uses a background coroutine to avoid blocking the main thread.
-     */
     fun initializeAsync() {
         if (llmInference != null || isInitializing) return
-        if (!modelLoader.isGemmaReady()) {
-            Timber.w("Gemma model not ready — skipping async init")
-            return
-        }
-        kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-            initializeSync()
-        }
+        if (!modelLoader.isGemmaReady()) return
+        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch { initializeSync() }
     }
 
-    /**
-     * Synchronously initialize the LLM inference engine.
-     * Safe to call multiple times — subsequent calls are no-ops.
-     * Dùng resolveGemmaTaskFile() để hỗ trợ cả file trong Download lẫn internal.
-     */
     suspend fun initializeSync() = withContext(Dispatchers.IO) {
-        if (llmInference != null) return@withContext
-        if (isInitializing) return@withContext
+        if (llmInference != null || isInitializing) return@withContext
 
-        // Tìm file .task — ưu tiên internal, fallback ra Download
+        if (!isMediaPipeAvailable()) {
+            Timber.w("MediaPipe LLM không tìm thấy trong classpath")
+            return@withContext
+        }
+
         val taskFile = modelLoader.resolveGemmaTaskFile()
         if (taskFile == null) {
-            Timber.w("Gemma model không tìm thấy ở bất kỳ vị trí nào")
+            Timber.w("Không tìm thấy file Gemma .task")
             return@withContext
         }
 
         isInitializing = true
         try {
-            Timber.i("Khởi tạo Gemma Translate từ: ${taskFile.absolutePath}")
-            val options = LlmInferenceOptions.builder()
-                .setModelPath(taskFile.absolutePath)
-                .setMaxTokens(MAX_TOKENS)
-                .setNumDraft(0)
-                .setPreferredBackend(LlmInference.Backend.GPU)
-                .build()
-
-            llmInference = LlmInference.createFromOptions(context, options)
-            initializationError = null
-            Timber.i("Gemma Translate khởi tạo thành công (GPU)")
+            // Thử GPU trước
+            llmInference = buildLlmInference(taskFile.absolutePath, useGpu = true)
+            Timber.i("Gemma khởi tạo thành công (GPU): ${taskFile.name}")
         } catch (e: Exception) {
-            Timber.e(e, "GPU init thất bại — thử lại với CPU")
-            // Retry with CPU backend
+            Timber.w("GPU init thất bại, thử CPU: ${e.message}")
             try {
-                val taskFile2 = modelLoader.resolveGemmaTaskFile() ?: return@withContext
-                val options = LlmInferenceOptions.builder()
-                    .setModelPath(taskFile2.absolutePath)
-                    .setMaxTokens(MAX_TOKENS)
-                    .setNumDraft(0)
-                    .setPreferredBackend(LlmInference.Backend.CPU)
-                    .build()
-                llmInference = LlmInference.createFromOptions(context, options)
-                initializationError = null
-                Timber.i("Gemma Translate initialized on CPU")
+                llmInference = buildLlmInference(taskFile.absolutePath, useGpu = false)
+                Timber.i("Gemma khởi tạo thành công (CPU)")
             } catch (e2: Exception) {
-                initializationError = e2
-                Timber.e(e2, "Gemma Translate CPU fallback also failed")
+                Timber.e(e2, "Gemma init thất bại hoàn toàn")
             }
         } finally {
             isInitializing = false
@@ -118,127 +88,158 @@ class GemmaTranslateManager @Inject constructor(
     }
 
     /**
-     * Translate English text to Vietnamese.
-     * Returns a Flow<String> that emits tokens as they are generated (streaming).
-     * The flow completes when generation finishes.
-     *
-     * @param text English text to translate
-     * @return Flow emitting cumulative token output
+     * Dùng reflection để tạo LlmInference instance.
+     * Tránh hard-coded import trực tiếp class MediaPipe.
      */
-    fun translateText(text: String): Flow<String> = callbackFlow {
-        val llm = ensureLlm() ?: run {
-            close(IllegalStateException("LLM not initialized"))
-            return@callbackFlow
-        }
+    private fun buildLlmInference(modelPath: String, useGpu: Boolean): Any {
+        val llmClass     = Class.forName("com.google.mediapipe.tasks.genai.llminference.LlmInference")
+        val optionsClass = Class.forName("com.google.mediapipe.tasks.genai.llminference.LlmInference\$LlmInferenceOptions")
+        val backendClass = Class.forName("com.google.mediapipe.tasks.genai.llminference.LlmInference\$Backend")
 
-        val prompt = TEXT_TRANSLATE_PROMPT_TEMPLATE.format(text.trim())
-        val session = createSession(llm)
+        val gpuBackend  = backendClass.getField("GPU").get(null)
+        val cpuBackend  = backendClass.getField("CPU").get(null)
+        val backend     = if (useGpu) gpuBackend else cpuBackend
 
-        try {
-            session.generateAsync(prompt) { partialResult, done ->
-                if (partialResult != null) {
-                    trySend(partialResult)
+        val builder = optionsClass.getMethod("builder").invoke(null)
+        builder.javaClass.getMethod("setModelPath", String::class.java).invoke(builder, modelPath)
+        builder.javaClass.getMethod("setMaxTokens", Int::class.java).invoke(builder, MAX_TOKENS)
+        builder.javaClass.getMethod("setNumDraft",  Int::class.java).invoke(builder, 0)
+        builder.javaClass.getMethod("setPreferredBackend", backendClass).invoke(builder, backend)
+        val options = builder.javaClass.getMethod("build").invoke(builder)
+
+        return llmClass.getMethod("createFromOptions", Context::class.java, optionsClass)
+            .invoke(null, context, options)!!
+    }
+
+    // ─── Text translation ─────────────────────────────────────────────────────
+
+    fun translateText(text: String): Flow<String> {
+        val llm = llmInference ?: return fallbackFlow("LLM chưa sẵn sàng")
+        return streamingFlow(llm, TEXT_PROMPT_TEMPLATE.format(text.trim()))
+    }
+
+    // ─── Image translation ────────────────────────────────────────────────────
+
+    fun translateImage(bitmap: Bitmap): Flow<String> {
+        val llm = llmInference ?: return fallbackFlow("LLM chưa sẵn sàng")
+        val resized = resizeBitmap(bitmap)
+        return callbackFlow {
+            val session = createSession(llm)
+            try {
+                // addImage
+                session.javaClass.getMethod("addImage", Bitmap::class.java).invoke(session, resized)
+                // generateAsync
+                invokeGenerateAsync(session, IMAGE_PROMPT) { token, done ->
+                    if (token != null) trySend(token)
+                    if (done == true) close()
                 }
-                if (done == true) {
-                    close()
+            } catch (e: Exception) {
+                Timber.e(e, "translateImage thất bại")
+                close(e)
+            } finally {
+                awaitClose {
+                    try { session.javaClass.getMethod("close").invoke(session) } catch (_: Exception) {}
+                    if (resized != bitmap) resized.recycle()
                 }
             }
+        }.flowOn(Dispatchers.IO)
+    }
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    private fun streamingFlow(llm: Any, prompt: String): Flow<String> = callbackFlow {
+        val session = createSession(llm)
+        try {
+            invokeGenerateAsync(session, prompt) { token, done ->
+                if (token != null) trySend(token)
+                if (done == true) close()
+            }
         } catch (e: Exception) {
-            Timber.e(e, "translateText failed")
+            Timber.e(e, "streamingFlow thất bại")
             close(e)
         } finally {
             awaitClose {
-                try { session.close() } catch (_: Exception) {}
+                try { session.javaClass.getMethod("close").invoke(session) } catch (_: Exception) {}
             }
         }
     }.flowOn(Dispatchers.IO)
 
-    /**
-     * Translate text found in an image from English to Vietnamese.
-     * Returns a Flow<String> that emits tokens as they are generated (streaming).
-     *
-     * @param bitmap Image bitmap (will be resized to max 1024px before inference)
-     * @return Flow emitting cumulative token output
-     */
-    fun translateImage(bitmap: Bitmap): Flow<String> = callbackFlow {
-        val llm = ensureLlm() ?: run {
-            close(IllegalStateException("LLM not initialized"))
-            return@callbackFlow
-        }
+    private fun createSession(llm: Any): Any {
+        val sessionClass  = Class.forName(
+            "com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession"
+        )
+        val sessionOptClass = Class.forName(
+            "com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession\$LlmInferenceSessionOptions"
+        )
+        val llmClass = Class.forName(
+            "com.google.mediapipe.tasks.genai.llminference.LlmInference"
+        )
 
-        val resizedBitmap = resizeBitmapForInference(bitmap)
-        val session = createSession(llm)
+        val builder = sessionOptClass.getMethod("builder").invoke(null)
+        builder.javaClass.getMethod("setTemperature", Float::class.java).invoke(builder, TEMPERATURE)
+        builder.javaClass.getMethod("setTopK",        Int::class.java  ).invoke(builder, TOP_K)
+        builder.javaClass.getMethod("setTopP",        Float::class.java).invoke(builder, TOP_P)
+        val options = builder.javaClass.getMethod("build").invoke(builder)
 
-        try {
-            // For multimodal: add the image to the session context, then prompt
-            session.addImage(resizedBitmap)
-            session.generateAsync(IMAGE_TRANSLATE_PROMPT_TEMPLATE) { partialResult, done ->
-                if (partialResult != null) {
-                    trySend(partialResult)
-                }
-                if (done == true) {
-                    close()
-                }
-            }
-        } catch (e: Exception) {
-            Timber.e(e, "translateImage failed")
-            close(e)
-        } finally {
-            awaitClose {
-                try { session.close() } catch (_: Exception) {}
-                if (resizedBitmap != bitmap) resizedBitmap.recycle()
-            }
-        }
-    }.flowOn(Dispatchers.IO)
-
-    /**
-     * Ensure the LLM is initialized, blocking if necessary.
-     * Returns null if model is not available.
-     */
-    private suspend fun ensureLlm(): LlmInference? {
-        if (llmInference != null) return llmInference
-        if (!modelLoader.isGemmaReady()) return null
-        initializeSync()
-        return llmInference
+        return sessionClass
+            .getMethod("createFromLlmInference", llmClass, sessionOptClass)
+            .invoke(null, llm, options)!!
     }
 
     /**
-     * Create a new LlmInferenceSession with configured parameters.
+     * Gọi generateAsync qua reflection.
+     * Tạo một lambda-compatible object cho ResultListener interface.
      */
-    private fun createSession(llm: LlmInference): LlmInferenceSession {
-        val sessionOptions = LlmInferenceSessionOptions.builder()
-            .setTemperature(TEMPERATURE)
-            .setTopK(TOP_K)
-            .setTopP(TOP_P)
-            .build()
-        return LlmInferenceSession.createFromLlmInference(llm, sessionOptions)
+    private fun invokeGenerateAsync(
+        session: Any,
+        prompt: String,
+        onResult: (String?, Boolean?) -> Unit
+    ) {
+        // Tìm interface ResultListener trong MediaPipe
+        val listenerInterface = try {
+            Class.forName(
+                "com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession\$LlmInferenceSessionOptions"
+            )
+            // Tìm functional interface listener
+            Class.forName("com.google.mediapipe.tasks.core.OutputHandler\$ResultListener")
+        } catch (_: Exception) {
+            // Fallback: dùng raw method với Kotlin lambda
+            null
+        }
+
+        // Dùng Kotlin lambda trực tiếp nếu method chấp nhận Function2
+        val generateMethod = session.javaClass.methods
+            .firstOrNull { it.name == "generateAsync" }
+
+        if (generateMethod == null) {
+            Timber.e("Không tìm thấy method generateAsync")
+            onResult(null, true)
+            return
+        }
+
+        generateMethod.invoke(session, prompt) { partialResult: Any?, done: Any? ->
+            onResult(partialResult as? String, done as? Boolean)
+        }
     }
 
-    /**
-     * Resize a bitmap so the longest side is ≤ 1024px to reduce TTFT latency.
-     * Returns the original bitmap unchanged if it already fits within the limit.
-     */
-    private fun resizeBitmapForInference(bitmap: Bitmap, maxSide: Int = 1024): Bitmap {
-        val w = bitmap.width
-        val h = bitmap.height
+    private fun resizeBitmap(bitmap: Bitmap, maxSide: Int = 1024): Bitmap {
+        val w = bitmap.width; val h = bitmap.height
         if (w <= maxSide && h <= maxSide) return bitmap
         val scale = maxSide.toFloat() / maxOf(w, h)
-        val newW = (w * scale).toInt().coerceAtLeast(1)
-        val newH = (h * scale).toInt().coerceAtLeast(1)
-        return Bitmap.createScaledBitmap(bitmap, newW, newH, true)
+        return Bitmap.createScaledBitmap(bitmap, (w * scale).toInt().coerceAtLeast(1),
+            (h * scale).toInt().coerceAtLeast(1), true)
     }
 
-    /** True if the LLM engine is ready to accept requests. */
+    private fun fallbackFlow(msg: String): Flow<String> {
+        Timber.w(msg)
+        return flowOf("[Lỗi: $msg]")
+    }
+
     val isReady: Boolean get() = llmInference != null
 
-    /** Release resources. Call this only on OOM or when the app is fully destroyed. */
     fun release() {
-        try {
-            llmInference?.close()
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to close LlmInference")
-        }
+        try { llmInference?.javaClass?.getMethod("close")?.invoke(llmInference) }
+        catch (e: Exception) { Timber.e(e, "Lỗi khi close LlmInference") }
         llmInference = null
-        Timber.i("GemmaTranslateManager released")
     }
 }

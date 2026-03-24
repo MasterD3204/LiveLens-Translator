@@ -10,10 +10,6 @@ import timber.log.Timber
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
-import java.io.FileInputStream
-import java.security.MessageDigest
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
  * Manages model file discovery, validation, and download progress tracking.
