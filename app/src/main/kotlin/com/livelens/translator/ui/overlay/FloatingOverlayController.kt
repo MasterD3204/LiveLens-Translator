@@ -1,13 +1,12 @@
 package com.livelens.translator.ui.overlay
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.PixelFormat
-import android.os.Build
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -18,6 +17,7 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.livelens.translator.model.TranslationMode
+import com.livelens.translator.service.AudioCaptureService
 import com.livelens.translator.service.TranslationManager
 import com.livelens.translator.ui.theme.LiveLensTheme
 import timber.log.Timber
@@ -137,11 +137,7 @@ class FloatingOverlayController(
                     TranslationOverlayCard(
                         translationManager = translationManager,
                         currentMode = currentMode,
-                        onModeChange = { mode ->
-                            Timber.d("Overlay: mode thay đổi sang $mode")
-                            currentMode = mode
-                            translationManager.setMode(mode)
-                        },
+                        onModeChange = { mode -> handleModeChange(mode) },
                         onMinimize = { collapse() }
                     )
                 }
@@ -184,6 +180,7 @@ class FloatingOverlayController(
 
     fun showAndSetMode(mode: TranslationMode) {
         Timber.i("showAndSetMode($mode) — isExpanded=$isExpanded, overlayCardView=${if (overlayCardView != null) "exists" else "null"}")
+        val previousMode = currentMode
         currentMode = mode
         if (!isExpanded) expand()
         // Update the overlay card content
@@ -194,16 +191,83 @@ class FloatingOverlayController(
                     TranslationOverlayCard(
                         translationManager = translationManager,
                         currentMode = currentMode,
-                        onModeChange = { m ->
-                            Timber.d("Overlay: mode thay đổi sang $m")
-                            currentMode = m
-                            translationManager.setMode(m)
-                        },
+                        onModeChange = { m -> handleModeChange(m) },
                         onMinimize = { collapse() }
                     )
                 }
             }
         } ?: Timber.w("showAndSetMode() — overlayCardView null sau khi expand()")
+
+        // Start audio capture nếu mode cần audio
+        if (mode != previousMode || !isAudioRunning) {
+            handleModeChange(mode)
+        }
+    }
+
+    // ─── Audio capture lifecycle ───────────────────────────────────────────────
+
+    /** Track xem AudioCaptureService có đang chạy không */
+    private var isAudioRunning = false
+
+    private fun handleModeChange(mode: TranslationMode) {
+        Timber.i("handleModeChange($mode) — previousAudioRunning=$isAudioRunning")
+        translationManager.setMode(mode)
+        when (mode) {
+            TranslationMode.CONVERSATION -> {
+                stopAudioCapture()
+                startMicCapture()
+            }
+            TranslationMode.MEDIA -> {
+                stopAudioCapture()
+                startMediaCapture()
+            }
+            TranslationMode.IMAGE -> {
+                // IMAGE mode không dùng AudioCaptureService
+                stopAudioCapture()
+            }
+        }
+        currentMode = mode
+    }
+
+    private fun startMicCapture() {
+        Timber.i("startMicCapture() — gửi ACTION_START_MIC đến AudioCaptureService")
+        try {
+            val intent = Intent(context, AudioCaptureService::class.java).apply {
+                action = AudioCaptureService.ACTION_START_MIC
+            }
+            context.startForegroundService(intent)
+            isAudioRunning = true
+            Timber.i("startForegroundService(ACTION_START_MIC) thành công ✓")
+        } catch (e: Exception) {
+            Timber.e(e, "startForegroundService(ACTION_START_MIC) THẤT BẠI ✗")
+        }
+    }
+
+    private fun startMediaCapture() {
+        // Media capture cần MediaProjection — phải request từ Activity
+        // Gửi broadcast để Activity biết cần request MediaProjection
+        Timber.i("startMediaCapture() — MEDIA mode cần MediaProjection từ Activity")
+        Timber.w("MEDIA mode: cần Activity để request MediaProjection — chưa implement flow này")
+        // TODO: Implement MediaProjection request flow qua Activity
+        // Hiện tại log để debug, sau sẽ implement broadcast → Activity → startForegroundService
+    }
+
+    private fun stopAudioCapture() {
+        if (!isAudioRunning) {
+            Timber.d("stopAudioCapture() — không có service đang chạy, bỏ qua")
+            return
+        }
+        Timber.i("stopAudioCapture() — gửi ACTION_STOP đến AudioCaptureService")
+        try {
+            val intent = Intent(context, AudioCaptureService::class.java).apply {
+                action = AudioCaptureService.ACTION_STOP
+            }
+            context.startService(intent)
+            isAudioRunning = false
+            Timber.i("stopAudioCapture() thành công ✓")
+        } catch (e: Exception) {
+            Timber.e(e, "stopAudioCapture() THẤT BẠI ✗")
+        }
     }
 
     private fun toggleExpanded() {
@@ -253,11 +317,13 @@ class FloatingOverlayController(
     }
 
     fun destroy() {
+        Timber.d("FloatingOverlayController.destroy() — dọn dẹp views và dừng audio")
+        stopAudioCapture()
         lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
         try { bubbleView?.let { windowManager.removeView(it) } } catch (_: Exception) {}
         try { overlayCardView?.let { windowManager.removeView(it) } } catch (_: Exception) {}
         bubbleView = null
         overlayCardView = null
-        Timber.d("FloatingOverlayController destroyed")
+        Timber.d("FloatingOverlayController destroyed ✓")
     }
 }

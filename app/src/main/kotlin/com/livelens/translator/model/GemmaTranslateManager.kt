@@ -16,7 +16,6 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -73,18 +72,24 @@ class GemmaTranslateManager(
             return
         }
         Timber.i("Bắt đầu khởi tạo Gemma bất đồng bộ...")
-        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch { initializeSync() }
+        // ✅ FIX: dùng Dispatchers.Main làm base vì createFromOptions() yêu cầu Main thread
+        // initializeSync() tự switch sang Main bên trong, scope này chỉ cần không bị confined IO
+        CoroutineScope(Dispatchers.Main + SupervisorJob()).launch {
+            initializeSync()
+        }
     }
 
-    suspend fun initializeSync() = withContext(Dispatchers.IO) {
+    suspend fun initializeSync() {
+        // MediaPipe LlmInference.createFromOptions() PHẢI chạy trên Main thread
+        // (nó tạo GL context và gọi các API Android yêu cầu Looper chính)
         if (llmInference != null || isInitializing) {
             Timber.d("initializeSync() bỏ qua — đã khởi tạo hoặc đang khởi tạo")
-            return@withContext
+            return
         }
         val taskFile = modelLoader.resolveGemmaTaskFile() ?: run {
             Timber.w("initializeSync() — Gemma .task file không tìm thấy ở bất kỳ vị trí nào!")
             Timber.w("  internal: ${modelLoader.gemmaTaskFile.absolutePath} (exists=${modelLoader.gemmaTaskFile.exists()})")
-            return@withContext
+            return
         }
         Timber.i("━━━ GemmaTranslateManager.initializeSync() BẮT ĐẦU ━━━")
         Timber.d("Task file: ${taskFile.absolutePath}")
@@ -98,8 +103,11 @@ class GemmaTranslateManager(
                 .setMaxNumImages(MAX_NUM_IMAGES)
                 .build()
             Timber.d("LlmInferenceOptions tạo xong: maxTopK=$MAX_TOP_K, maxNumImages=$MAX_NUM_IMAGES")
-            Timber.d("Đang tạo LlmInference (có thể mất vài giây)...")
-            llmInference = LlmInference.createFromOptions(context, options)
+            Timber.d("Đang tạo LlmInference trên Main thread (có thể mất vài giây)...")
+            // ✅ FIX: createFromOptions() phải chạy trên Main thread
+            llmInference = withContext(Dispatchers.Main) {
+                LlmInference.createFromOptions(context, options)
+            }
             val elapsed = System.currentTimeMillis() - startMs
             Timber.i("━━━ Gemma khởi tạo THÀNH CÔNG ✓ trong ${elapsed}ms — ${taskFile.name} ━━━")
         } catch (e: Exception) {
