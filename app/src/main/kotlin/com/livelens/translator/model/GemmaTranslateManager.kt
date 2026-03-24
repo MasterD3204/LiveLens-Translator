@@ -2,24 +2,33 @@ package com.livelens.translator.model
 
 import android.content.Context
 import android.graphics.Bitmap
+import com.google.mediapipe.framework.image.BitmapImageBuilder
+import com.google.mediapipe.tasks.genai.llminference.GraphOptions
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.LlmInference.LlmInferenceOptions
+import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
+import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession.LlmInferenceSessionOptions
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 
 /**
- * Wrapper quanh MediaPipe LLM Inference API (Gemma EN→VI).
- * Chỉ dùng API cốt lõi: LlmInference + LlmInferenceOptions + generateAsync.
- * Không dùng LlmInferenceSession, Backend enum, setNumDraft — tránh API không ổn định.
+ * Wrapper quanh MediaPipe LLM Inference API (tasks-genai 0.10.27).
+ *
+ * Text streaming: setResultListener trong options + generateResponseAsync(prompt)
+ * Image translation: LlmInferenceSession + BitmapImageBuilder + generateResponse()
  */
 class GemmaTranslateManager(
     private val context: Context,
@@ -28,12 +37,23 @@ class GemmaTranslateManager(
     private var llmInference: LlmInference? = null
     private var isInitializing = false
 
-    companion object {
-        private const val MAX_TOKENS = 1024
+    // Kênh hiện tại để nhận partial results khi streaming
+    @Volatile private var activeChannel: SendChannel<String>? = null
 
+    // Mutex đảm bảo chỉ có 1 request tại một thời điểm
+    private val mutex = Mutex()
+
+    companion object {
+        private const val MAX_TOP_K = 64
+        private const val MAX_NUM_IMAGES = 5
+
+        // Prompt chuẩn theo hướng dẫn từ nhà phát triển
         private const val TEXT_PROMPT =
-            "Translate the following English text to Vietnamese. " +
-            "Output only the translation, nothing else:\n%s"
+            "You are a professional English (en) to Vietnamese (vie) translator. " +
+            "Your goal is to accurately convey the meaning and nuances of the original English text " +
+            "while adhering to Vietnamese grammar, vocabulary, and cultural sensitivities.\n\n" +
+            "Produce only the Vietnamese translation, without any additional explanations or commentary. " +
+            "Please translate the following English text into Vietnamese: %s"
 
         private const val IMAGE_PROMPT =
             "Translate all English text found in this image to Vietnamese. " +
@@ -45,9 +65,7 @@ class GemmaTranslateManager(
     fun initializeAsync() {
         if (llmInference != null || isInitializing) return
         if (!modelLoader.isGemmaReady()) return
-        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
-            initializeSync()
-        }
+        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch { initializeSync() }
     }
 
     suspend fun initializeSync() = withContext(Dispatchers.IO) {
@@ -58,9 +76,17 @@ class GemmaTranslateManager(
         }
         isInitializing = true
         try {
+            // Tạo LlmInference với result listener cho streaming text
+            // và setMaxNumImages cho image translation
             val options = LlmInferenceOptions.builder()
                 .setModelPath(taskFile.absolutePath)
-                .setMaxTokens(MAX_TOKENS)
+                .setMaxTopK(MAX_TOP_K)
+                .setMaxNumImages(MAX_NUM_IMAGES)
+                .setResultListener { partial, done ->
+                    // Gửi partial result về channel hiện tại
+                    if (partial != null) activeChannel?.trySend(partial)
+                    if (done) activeChannel?.close()
+                }
                 .build()
             llmInference = LlmInference.createFromOptions(context, options)
             Timber.i("Gemma initialized: ${taskFile.name}")
@@ -71,43 +97,78 @@ class GemmaTranslateManager(
         }
     }
 
-    // ─── Text translation ─────────────────────────────────────────────────────
-
-    fun translateText(text: String): Flow<String> {
-        val llm = llmInference ?: return flowOf("[LLM not ready]")
-        return streamFlow(llm, TEXT_PROMPT.format(text.trim()))
-    }
-
-    // ─── Image translation ────────────────────────────────────────────────────
-
-    fun translateImage(bitmap: Bitmap): Flow<String> {
-        val llm = llmInference ?: return flowOf("[LLM not ready]")
-        // Image text description passed as text prompt (multimodal via text fallback)
-        return streamFlow(llm, IMAGE_PROMPT)
-    }
-
-    // ─── Streaming helper ─────────────────────────────────────────────────────
+    // ─── Text translation (streaming) ────────────────────────────────────────
 
     /**
-     * Wrap generateAsync in a Flow.
-     * generateAsync(String, GenerateProgressListener) where GenerateProgressListener
-     * is a @FunctionalInterface with: void onResult(@Nullable String partial, boolean done)
-     * → Kotlin SAM: (String?, Boolean) -> Unit ✓
+     * Dịch text tiếng Anh → tiếng Việt với streaming (token by token).
+     * Dùng generateResponseAsync() + setResultListener.
      */
-    private fun streamFlow(llm: LlmInference, prompt: String): Flow<String> = callbackFlow {
-        try {
-            llm.generateAsync(prompt) { partial, done ->
-                if (partial != null) trySend(partial)
-                if (done) close()
-            }
-        } catch (e: Exception) {
-            Timber.e(e, "generateAsync failed")
-            close(e)
+    fun translateText(text: String): Flow<String> = callbackFlow {
+        val llm = llmInference ?: run {
+            close(IllegalStateException("LLM chưa khởi tạo"))
+            return@callbackFlow
         }
-        awaitClose { }
+
+        mutex.withLock {
+            activeChannel = channel
+            try {
+                withContext(Dispatchers.IO) {
+                    llm.generateResponseAsync(TEXT_PROMPT.format(text.trim()))
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "generateResponseAsync thất bại")
+                activeChannel = null
+                close(e)
+                return@withLock
+            }
+            // Chờ cho đến khi listener gọi channel.close() (done=true)
+            awaitClose { activeChannel = null }
+        }
     }.flowOn(Dispatchers.IO)
 
-    // ─── Utils ────────────────────────────────────────────────────────────────
+    // ─── Image translation (blocking session) ────────────────────────────────
+
+    /**
+     * Dịch text trong ảnh sang tiếng Việt.
+     * Dùng LlmInferenceSession với enableVisionModality + MPImage.
+     */
+    fun translateImage(bitmap: Bitmap): Flow<String> = flow {
+        val llm = llmInference ?: run {
+            emit("[LLM chưa sẵn sàng]")
+            return@flow
+        }
+
+        mutex.withLock {
+            try {
+                val mpImage = BitmapImageBuilder(resizeBitmap(bitmap)).build()
+
+                val sessionOptions = LlmInferenceSessionOptions.builder()
+                    .setTopK(40)
+                    .setTemperature(0.1f)
+                    .setGraphOptions(
+                        GraphOptions.builder()
+                            .setEnableVisionModality(true)
+                            .build()
+                    )
+                    .build()
+
+                val result = withContext(Dispatchers.IO) {
+                    LlmInferenceSession.createFromOptions(llm, sessionOptions).use { session ->
+                        session.addQueryChunk(IMAGE_PROMPT)
+                        session.addImage(mpImage)
+                        session.generateResponse()
+                    }
+                }
+
+                if (!result.isNullOrBlank()) emit(result)
+            } catch (e: Exception) {
+                Timber.e(e, "translateImage thất bại")
+                emit("[Lỗi dịch ảnh: ${e.message}]")
+            }
+        }
+    }.flowOn(Dispatchers.IO)
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
 
     private fun resizeBitmap(bitmap: Bitmap, maxSide: Int = 1024): Bitmap {
         val w = bitmap.width; val h = bitmap.height
@@ -126,6 +187,5 @@ class GemmaTranslateManager(
     fun release() {
         try { llmInference?.close() } catch (e: Exception) { Timber.e(e) }
         llmInference = null
-        Timber.i("GemmaTranslateManager released")
     }
 }
