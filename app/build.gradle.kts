@@ -125,6 +125,7 @@ dependencies {
 
     // MediaPipe LLM Inference
     implementation(libs.mediapipe.tasks.genai)
+    implementation(libs.mediapipe.tasks.vision)
 
     // DataStore
     implementation(libs.datastore.preferences)

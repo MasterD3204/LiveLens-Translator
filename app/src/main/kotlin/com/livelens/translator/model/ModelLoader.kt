@@ -8,19 +8,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.File
-
-/**
- * Manages model file discovery, validation, and download progress tracking.
- *
- * Các model khác (STT, VAD, TTS, Diarization) lấy từ internal storage.
- * Riêng Gemma .task file: tìm kiếm theo thứ tự ưu tiên sau:
- *   1. Internal storage: <filesDir>/models/gemma/*.task  (đã import trước đó)
- *   2. Thư mục Download của thiết bị: /sdcard/Download/*.task
- *   3. External files dir của app: <externalFilesDir>/models/gemma/*.task
- *
- * Khi tìm thấy ở Download hoặc external, file sẽ được COPY vào internal
- * storage để dùng lâu dài (tránh phụ thuộc vào quyền READ_EXTERNAL_STORAGE).
- */
 class ModelLoader(
     private val context: Context
 ) {
@@ -174,7 +161,7 @@ class ModelLoader(
 
     fun isSttReady(): Boolean =
         sttEncoderFile.exists() && sttDecoderFile.exists() &&
-        sttJoinerFile.exists() && sttTokensFile.exists()
+                sttJoinerFile.exists() && sttTokensFile.exists()
 
     fun isVadReady(): Boolean = vadModelFile.exists()
 

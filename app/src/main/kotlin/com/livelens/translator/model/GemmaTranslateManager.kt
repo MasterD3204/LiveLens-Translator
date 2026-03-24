@@ -76,17 +76,11 @@ class GemmaTranslateManager(
         }
         isInitializing = true
         try {
-            // Tạo LlmInference với result listener cho streaming text
-            // và setMaxNumImages cho image translation
+            // ✅ API mới: KHÔNG dùng setResultListener ở đây nữa
             val options = LlmInferenceOptions.builder()
                 .setModelPath(taskFile.absolutePath)
                 .setMaxTopK(MAX_TOP_K)
                 .setMaxNumImages(MAX_NUM_IMAGES)
-                .setResultListener { partial, done ->
-                    // Gửi partial result về channel hiện tại
-                    if (partial != null) activeChannel?.trySend(partial)
-                    if (done) activeChannel?.close()
-                }
                 .build()
             llmInference = LlmInference.createFromOptions(context, options)
             Timber.i("Gemma initialized: ${taskFile.name}")

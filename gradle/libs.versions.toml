@@ -16,6 +16,7 @@ coil                    = "2.7.0"
 timber                  = "5.0.1"
 accompanist             = "0.36.0"
 ksp                     = "2.1.0-1.0.29"
+mediapipe-tasks-vision  = "0.10.14"
 
 [libraries]
 # Compose
@@ -63,7 +64,7 @@ camerax-view                = { group = "androidx.camera", name = "camera-view",
 
 # MediaPipe LLM Inference
 mediapipe-tasks-genai       = { group = "com.google.mediapipe", name = "tasks-genai", version.ref = "mediapipe-tasks-genai" }
-
+mediapipe-tasks-vision      = { group = "com.google.mediapipe", name = "tasks-vision", version.ref = "mediapipe-tasks-vision" }
 # DataStore
 datastore-preferences       = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 

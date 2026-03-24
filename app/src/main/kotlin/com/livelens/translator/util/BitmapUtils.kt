@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import androidx.camera.core.ImageProxy
-import androidx.exifinterface.media.ExifInterface
 import timber.log.Timber
 import java.io.ByteArrayOutputStream
 import java.io.File
