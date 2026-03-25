@@ -122,7 +122,8 @@ class ModelSetupViewModel @Inject constructor(
                 _importMessage.value = "✅ Import thành công: ${sourceFile.name}"
                 Timber.i("Gemma import thành công từ Downloads")
             } else {
-                _importMessage.value = "❌ Import thất bại. Vui lòng thử lại."
+                _importMessage.value = "❌ Import thất bại: file không hợp lệ hoặc bị corrupt.\n" +
+                    "Vui lòng tải lại file .task từ nguồn chính thức."
                 Timber.e("Gemma import thất bại")
             }
 
@@ -191,7 +192,15 @@ class ModelSetupViewModel @Inject constructor(
 
                     // Lấy tên file gốc để đổi tên nếu cần
                     val originalName = DocumentFile.fromSingleUri(context, uri)?.name ?: ""
-                    Timber.i("Đã import từ URI: $originalName → ${dest.name} (${dest.length() / 1024 / 1024} MB)")
+                    Timber.i("Đã copy từ URI: $originalName → ${dest.name} (${dest.length() / 1024 / 1024} MB)")
+
+                    // Validate ZIP integrity sau khi copy
+                    if (!modelLoader.isValidZipFile(dest)) {
+                        Timber.e("importGemmaFromUri(): file sau khi copy BỊ CORRUPT (không phải ZIP) — xóa!")
+                        dest.delete()
+                        return@withContext false
+                    }
+                    Timber.i("importGemmaFromUri(): ZIP validation OK ✓")
                     dest.exists() && dest.length() > 0
                 } catch (e: Exception) {
                     Timber.e(e, "Lỗi import từ URI")
@@ -205,7 +214,8 @@ class ModelSetupViewModel @Inject constructor(
             if (success) {
                 _importMessage.value = "✅ Import thành công!"
             } else {
-                _importMessage.value = "❌ Import thất bại. Vui lòng thử lại."
+                _importMessage.value = "❌ Import thất bại: file không hợp lệ hoặc bị corrupt.\n" +
+                    "Vui lòng tải lại file .task từ nguồn chính thức."
             }
 
             checkModels()
@@ -255,6 +265,22 @@ class ModelSetupViewModel @Inject constructor(
                 f.delete()
                 Timber.i("Đã xóa Gemma model khỏi internal storage")
             }
+            checkModels()
+            scanDownloadsForTaskFiles()
+        }
+    }
+
+    /**
+     * Xóa file Gemma bị corrupt và reset trạng thái để user có thể re-import.
+     */
+    fun deleteCorruptGemmaAndReset() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val deleted = modelLoader.deleteCorruptGemmaFile()
+            Timber.i("deleteCorruptGemmaAndReset(): deleted=$deleted")
+            _importMessage.value = if (deleted)
+                "🗑️ Đã xóa file bị lỗi. Vui lòng import lại."
+            else
+                "⚠️ Không tìm thấy file để xóa."
             checkModels()
             scanDownloadsForTaskFiles()
         }

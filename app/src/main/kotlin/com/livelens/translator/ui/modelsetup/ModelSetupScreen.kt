@@ -173,7 +173,8 @@ fun ModelSetupScreen(
                     onImportFromList  = { file -> confirmImportFile = file },
                     onBrowseFile      = { filePicker.launch(arrayOf("*/*")) },
                     onScanAgain       = { viewModel.scanDownloadsForTaskFiles() },
-                    onDeleteImported  = { viewModel.deleteImportedGemma() }
+                    onDeleteImported  = { viewModel.deleteImportedGemma() },
+                    onDeleteCorrupt   = { viewModel.deleteCorruptGemmaAndReset() }
                 )
             }
 
@@ -334,6 +335,9 @@ private fun ModelStatusRowItem(name: String, size: String, state: ModelDownloadS
             is ModelDownloadState.Failed ->
                 Icon(Icons.Default.Error, null,
                     tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(20.dp))
+            is ModelDownloadState.Corrupt ->
+                Icon(Icons.Default.Warning, null,
+                    tint = Color(0xFFFF5722), modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -349,7 +353,8 @@ private fun GemmaImportCard(
     onImportFromList: (File) -> Unit,
     onBrowseFile: () -> Unit,
     onScanAgain: () -> Unit,
-    onDeleteImported: () -> Unit
+    onDeleteImported: () -> Unit,
+    onDeleteCorrupt: () -> Unit = {}
 ) {
     val isImporting = importProgress >= 0f
 
@@ -373,19 +378,73 @@ private fun GemmaImportCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = when {
+                            gemmaState is ModelDownloadState.Corrupt -> "⚠️ File bị hỏng — cần import lại"
                             isAlreadyImported               -> "Đã import vào ứng dụng ✅"
                             gemmaState is ModelDownloadState.FoundInDownloads -> "Tìm thấy trong Download 📂"
                             else                            -> "Chưa có model Gemma"
                         },
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = if (gemmaState is ModelDownloadState.Corrupt)
+                            Color(0xFFFF5722) else MaterialTheme.colorScheme.onSurface
                     )
-                    if (isAlreadyImported) {
+                    if (isAlreadyImported && gemmaState !is ModelDownloadState.Corrupt) {
                         Text(
                             "Gemma sẵn sàng dùng",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF4CAF50)
                         )
+                    }
+                }
+            }
+
+            // ── Banner cảnh báo Corrupt ───────────────────────────────────────
+            if (gemmaState is ModelDownloadState.Corrupt) {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Warning,
+                                null,
+                                tint = Color(0xFFFF5722),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                "File Gemma bị hỏng",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFB71C1C)
+                            )
+                        }
+                        Text(
+                            "File .task tồn tại nhưng không phải định dạng ZIP hợp lệ. " +
+                            "Nguyên nhân thường gặp:\n" +
+                            "• Tải xuống bị gián đoạn\n" +
+                            "• File bị lỗi trong quá trình copy\n" +
+                            "• Sai file (không phải .task của MediaPipe)\n\n" +
+                            "Vui lòng xóa file này và tải lại từ nguồn chính thức.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFC62828)
+                        )
+                        Button(
+                            onClick = onDeleteCorrupt,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFFF5722)
+                            )
+                        ) {
+                            Icon(Icons.Default.Warning, null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Xóa file hỏng & import lại")
+                        }
                     }
                 }
             }

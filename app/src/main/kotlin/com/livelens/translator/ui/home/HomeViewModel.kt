@@ -79,7 +79,10 @@ class HomeViewModel @Inject constructor(
                 modelLoader.checkAllModels()
                 val status = modelLoader.getModelStatusInfo()
                 Timber.i("HomeViewModel: Model status — STT=${status.sttReady}, VAD=${status.vadReady}, TTS=${status.ttsReady}, Dia=${status.diarizationReady}, Gemma=${status.gemmaReady}")
-                Timber.d("HomeViewModel: Gemma file='${status.gemmaFileName}', inDownloads=${status.gemmaInDownloads}, sttSizeMb=${status.sttSizeMb}MB, gemmaSizeMb=${status.gemmaSizeMb}MB")
+                Timber.d("HomeViewModel: Gemma file='${status.gemmaFileName}', corrupt=${status.gemmaCorrupt}, inDownloads=${status.gemmaInDownloads}, sttSizeMb=${status.sttSizeMb}MB, gemmaSizeMb=${status.gemmaSizeMb}MB")
+                if (status.gemmaCorrupt) {
+                    Timber.e("HomeViewModel: ⚠️ GEMMA FILE BỊ CORRUPT! File .task tồn tại nhưng không phải ZIP hợp lệ — cần re-import!")
+                }
                 _uiState.value = _uiState.value.copy(modelStatusInfo = status)
             } catch (e: Exception) {
                 Timber.e(e, "HomeViewModel: loadModelStatus() THẤT BẠI ✗")
